@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Dumbbell, Menu, X } from 'lucide-react';
 import { NAV_LINKS } from '../../utils/data';
+import { Link, useNavigate } from "react-router-dom";
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  
+  const navigate = useNavigate();
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -62,9 +65,9 @@ export default function Navbar() {
 
             {/* Right Actions */}
             <div className="hidden lg:flex items-center gap-3">
-              <button className="px-4 py-2 text-sm font-medium text-[#B8B8B8] hover:text-white transition-colors duration-200">
+              <Link to="/login" className="px-4 py-2 text-sm font-medium text-[#B8B8B8] hover:text-white transition-colors duration-200">
                 Login
-              </button>
+              </Link>
               <button className="px-5 py-2 text-sm font-semibold bg-white text-[#070707] rounded-xl hover:bg-[#7CFF5B] transition-all duration-300 hover:scale-105 shadow-lg shadow-white/5">
                 Get Started
               </button>
