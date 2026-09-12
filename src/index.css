@@ -14,17 +14,31 @@
   --color-border-medium: rgba(255, 255, 255, 0.12);
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+/* NOTE: this reset must live in @layer base.
+   Unlayered CSS outranks Tailwind's utilities layer, so a bare
+   `* { padding: 0 }` silently cancels every p-*/px-*/py-* class in the app. */
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
 
-html {
-  scroll-behavior: auto;
-  background-color: #070707;
-  color: #ffffff;
-  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  html {
+    scroll-behavior: auto;
+    background-color: #070707;
+    color: #ffffff;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  body {
+    background-color: #070707;
+    color: #ffffff;
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
 html.lenis,
@@ -46,15 +60,6 @@ html.lenis body {
 
 .lenis.lenis-smooth iframe {
   pointer-events: none;
-}
-
-body {
-  background-color: #070707;
-  color: #ffffff;
-  min-height: 100vh;
-  overflow-x: hidden;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
 
 ::selection {

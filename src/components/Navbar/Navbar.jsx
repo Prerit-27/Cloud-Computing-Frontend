@@ -2,13 +2,11 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Dumbbell, Menu, X } from 'lucide-react';
 import { NAV_LINKS } from '../../utils/data';
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  
-  const navigate = useNavigate();
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -68,9 +66,9 @@ export default function Navbar() {
               <Link to="/login" className="px-4 py-2 text-sm font-medium text-[#B8B8B8] hover:text-white transition-colors duration-200">
                 Login
               </Link>
-              <button className="px-5 py-2 text-sm font-semibold bg-white text-[#070707] rounded-xl hover:bg-[#7CFF5B] transition-all duration-300 hover:scale-105 shadow-lg shadow-white/5">
+              <Link to="/signup" className="px-5 py-2 text-sm font-semibold bg-white text-[#070707] rounded-xl hover:bg-[#7CFF5B] transition-all duration-300 hover:scale-105 shadow-lg shadow-white/5">
                 Get Started
-              </button>
+              </Link>
             </div>
 
             {/* Mobile Menu Toggle */}
@@ -115,12 +113,12 @@ export default function Navbar() {
                 transition={{ delay: 0.5, duration: 0.4 }}
                 className="flex flex-col items-center gap-3 mt-8"
               >
-                <button className="px-8 py-3 text-sm font-medium text-white rounded-xl bg-[#181818] border border-[rgba(255,255,255,0.08)] hover:bg-[#222] transition-colors">
+                <Link to="/login" onClick={() => setMenuOpen(false)} className="px-8 py-3 text-sm font-medium text-white rounded-xl bg-[#181818] border border-[rgba(255,255,255,0.08)] hover:bg-[#222] transition-colors">
                   Login
-                </button>
-                <button className="px-8 py-3 text-sm font-semibold bg-[#7CFF5B] text-[#070707] rounded-xl hover:scale-105 transition-transform shadow-lg shadow-[#7CFF5B]/20">
+                </Link>
+                <Link to="/signup" onClick={() => setMenuOpen(false)} className="px-8 py-3 text-sm font-semibold bg-[#7CFF5B] text-[#070707] rounded-xl hover:scale-105 transition-transform shadow-lg shadow-[#7CFF5B]/20">
                   Get Started
-                </button>
+                </Link>
               </motion.div>
             </div>
           </motion.div>

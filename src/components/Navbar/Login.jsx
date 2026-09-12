@@ -1,24 +1,30 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Dumbbell, Menu, X } from 'lucide-react';
+import { Dumbbell, Loader2, AlertCircle } from 'lucide-react';
+import { useAuth } from '../../context/auth-context';
 
 export default function Login() {
   const navigate = useNavigate();
+  const { signIn } = useAuth();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
-
-    // TODO: Replace with your real authentication
-    console.log("Login:", { email, password });
-
-    // Example:
-    // localStorage.setItem("isLoggedIn", "true");
-    // navigate("/");
-
-    navigate("/");
+    setError("");
+    setSubmitting(true);
+    try {
+      // TODO(django): POST /api/auth/login/ — see utils/api.js
+      await signIn({ email, password });
+      navigate("/app/dashboard");
+    } catch (err) {
+      setError(err.message || "Could not sign you in. Check your details and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -199,6 +205,13 @@ export default function Login() {
           </div>
 
 
+          {error && (
+            <div className="mb-5 flex gap-3 p-4 rounded-xl bg-[#FF5B5B]/10 border border-[#FF5B5B]/25">
+              <AlertCircle className="w-4 h-4 text-[#FF5B5B] shrink-0 mt-0.5" />
+              <p className="text-sm text-[#FF8A8A]">{error}</p>
+            </div>
+          )}
+
           {/* Login form */}
           <form onSubmit={handleLogin} className="space-y-4">
 
@@ -278,6 +291,7 @@ export default function Login() {
             {/* Login button */}
             <button
               type="submit"
+              disabled={submitting}
               className="
                 w-full
                 h-14
@@ -291,9 +305,13 @@ export default function Login() {
                 hover:bg-[#91ff75]
                 hover:scale-[1.01]
                 active:scale-[0.99]
+                disabled:opacity-60
+                disabled:hover:scale-100
+                flex items-center justify-center gap-2
               "
             >
-              Log in
+              {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+              {submitting ? "Logging in…" : "Log in"}
             </button>
 
           </form>
