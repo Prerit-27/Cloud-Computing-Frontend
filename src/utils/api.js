@@ -1,171 +1,273 @@
 /**
  * ============================================================================
- *  API LAYER — the single place the frontend talks to Django.
+ *  API LAYER — every call to the Django backend goes through this file.
  * ============================================================================
  *
- * Right now every function returns mock data. Each one is marked with a
- * `TODO(django)` comment naming the endpoint it should call, so wiring the
- * backend is a matter of deleting the mock return and uncommenting the request.
+ * Endpoints mirror /api/schema/ exactly:
  *
- * Suggested Django setup (DRF + SimpleJWT):
+ *   exercises
+ *     GET    /api/exercises/
+ *     POST   /api/exercises/create/
+ *     PATCH  /api/exercises/{id}/
+ *     DELETE /api/exercises/{id}/delete/
  *
- *   POST   /api/auth/register/        -> { user, access, refresh }
- *   POST   /api/auth/login/           -> { user, access, refresh }
- *   POST   /api/auth/logout/
- *   GET    /api/auth/me/              -> user
- *   PATCH  /api/profile/              -> user
- *   GET    /api/workouts/?start=&end= -> [session]
- *   POST   /api/workouts/             -> session
- *   PATCH  /api/workouts/:id/         -> session
- *   DELETE /api/workouts/:id/
- *   GET    /api/stats/summary/        -> stats
- *   GET    /api/muscles/              -> [muscle]
+ *   user
+ *     POST   /api/register/
+ *     POST   /api/login/
+ *     POST   /api/logout/
+ *     GET    /api/profile/
+ *     PATCH  /api/profile/
+ *     POST   /api/profile/change-password/
+ *     POST   /api/profile/upload-picture/
+ *     DELETE /api/profile/delete/
  *
- * Set VITE_API_URL in a .env file, e.g.  VITE_API_URL=http://127.0.0.1:8000/api
+ *   schedule
+ *     GET    /api/schedule/
+ *     POST   /api/schedule/create/
+ *     PUT    /api/schedule/{id}/
+ *     DELETE /api/schedule/{id}/delete/
+ *
+ * Auth: DRF TokenAuthentication. /api/login/ and /api/register/ are expected to
+ * return a token; it is stored in localStorage and sent as
+ *   Authorization: Token <key>
+ * on every subsequent request.
+ *
+ * Configure the base URL in .env:
+ *   VITE_API_URL=http://127.0.0.1:8000/api
  */
 
-import {
-  MOCK_USER,
-  MOCK_STATS,
-  MOCK_WEEKLY_VOLUME,
-  MOCK_PERSONAL_BESTS,
-  MOCK_ACHIEVEMENTS,
-  MOCK_RECENT_ACTIVITY,
-  buildMockSessions,
-} from './mockData';
+export const API_URL = (import.meta.env?.VITE_API_URL ?? 'http://127.0.0.1:8000/api').replace(
+  /\/$/,
+  ''
+);
 
-export const API_URL = import.meta.env?.VITE_API_URL ?? 'http://127.0.0.1:8000/api';
+const TOKEN_KEY = 'fitpulse.token';
 
-const TOKEN_KEY = 'fitpulse.access';
-const REFRESH_KEY = 'fitpulse.refresh';
-
-export const tokens = {
-  get: () => localStorage.getItem(TOKEN_KEY),
-  getRefresh: () => localStorage.getItem(REFRESH_KEY),
-  set: (access, refresh) => {
-    if (access) localStorage.setItem(TOKEN_KEY, access);
-    if (refresh) localStorage.setItem(REFRESH_KEY, refresh);
+export const auth = {
+  getToken: () => {
+    try {
+      return localStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null;
+    }
   },
-  clear: () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_KEY);
+  setToken: (token) => {
+    try {
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+    } catch {
+      /* storage unavailable */
+    }
   },
+  clearToken: () => {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  },
+  isAuthenticated: () => !!auth.getToken(),
 };
 
-/** Thin fetch wrapper — adds the JWT header and unwraps DRF error payloads. */
-export async function request(path, { method = 'GET', body, ...rest } = {}) {
-  const res = await fetch(`${API_URL}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(tokens.get() ? { Authorization: `Bearer ${tokens.get()}` } : {}),
-      ...rest.headers,
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-    ...rest,
-  });
-
-  if (!res.ok) {
-    let detail = `Request failed (${res.status})`;
-    try {
-      const data = await res.json();
-      // DRF returns either { detail: "..." } or { field: ["..."] }
-      detail =
-        data.detail ??
-        Object.entries(data)
-          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
-          .join('\n') ??
-        detail;
-    } catch {
-      /* non-JSON error body */
-    }
-    throw new Error(detail);
+/** Raised for any non-2xx response. `fields` holds DRF per-field errors. */
+export class ApiError extends Error {
+  constructor(message, { status, fields } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.fields = fields ?? {};
   }
-
-  return res.status === 204 ? null : res.json();
 }
 
-/* Simulates network latency so loading states are visible while mocking. */
-const delay = (ms = 350) => new Promise((r) => setTimeout(r, ms));
+/** Turns a DRF error body into a readable message + per-field map. */
+function parseErrorBody(body, status) {
+  if (!body || typeof body !== 'object') {
+    return { message: `Request failed (${status})`, fields: {} };
+  }
+  if (typeof body.detail === 'string') {
+    return { message: body.detail, fields: {} };
+  }
+
+  const fields = {};
+  const parts = [];
+  for (const [key, value] of Object.entries(body)) {
+    const text = Array.isArray(value) ? value.join(' ') : String(value);
+    parts.push(key === 'non_field_errors' ? text : `${key}: ${text}`);
+    fields[key] = text;
+  }
+  return {
+    message: parts.join('\n') || `Request failed (${status})`,
+    fields,
+  };
+}
+
+/**
+ * Core fetch wrapper.
+ *
+ * @param path      endpoint path, e.g. '/exercises/'
+ * @param method    HTTP verb
+ * @param body      plain object (sent as JSON) or FormData (sent as-is)
+ * @param authed    attach the Authorization header (default true)
+ */
+export async function request(path, { method = 'GET', body, authed = true, ...rest } = {}) {
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const token = authed ? auth.getToken() : null;
+
+  const headers = {
+    Accept: 'application/json',
+    // FormData must set its own multipart boundary — never set Content-Type here.
+    ...(isFormData || body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    ...(token ? { Authorization: `Token ${token}` } : {}),
+    ...rest.headers,
+  };
+
+  let res;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers,
+      ...(body !== undefined ? { body: isFormData ? body : JSON.stringify(body) } : {}),
+      ...rest,
+    });
+  } catch {
+    throw new ApiError('Cannot reach the server. Is the Django dev server running?', {
+      status: 0,
+    });
+  }
+
+  if (res.status === 401) {
+    auth.clearToken();
+    throw new ApiError('Your session has expired. Please log in again.', { status: 401 });
+  }
+
+  if (!res.ok) {
+    let parsed = { message: `Request failed (${res.status})`, fields: {} };
+    try {
+      parsed = parseErrorBody(await res.json(), res.status);
+    } catch {
+      /* error body was not JSON */
+    }
+    throw new ApiError(parsed.message, { status: res.status, fields: parsed.fields });
+  }
+
+  if (res.status === 204) return null;
+
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+/** DRF pagination returns {count, next, previous, results}; plain lists don't. */
+export function unwrapList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && Array.isArray(payload.results)) return payload.results;
+  return [];
+}
 
 /* ========================================================================== */
-/* AUTH                                                                        */
+/* AUTH / USER                                                                 */
 /* ========================================================================== */
+
+/** Pulls the token out of whatever shape the backend returns it in. */
+function extractToken(payload) {
+  return payload?.token ?? payload?.key ?? payload?.auth_token ?? payload?.access ?? null;
+}
 
 export async function register(payload) {
-  // TODO(django): return request('/auth/register/', { method: 'POST', body: payload });
-  await delay();
-  const user = { ...MOCK_USER, email: payload.email, firstName: payload.firstName ?? MOCK_USER.firstName };
-  tokens.set('mock-access-token', 'mock-refresh-token');
-  return { user, access: 'mock-access-token', refresh: 'mock-refresh-token' };
+  const data = await request('/register/', { method: 'POST', body: payload, authed: false });
+  const token = extractToken(data);
+  if (token) auth.setToken(token);
+  return data;
 }
 
 export async function login(payload) {
-  // TODO(django): return request('/auth/login/', { method: 'POST', body: payload });
-  await delay();
-  tokens.set('mock-access-token', 'mock-refresh-token');
-  return { user: { ...MOCK_USER, email: payload.email }, access: 'mock-access-token' };
+  const data = await request('/login/', { method: 'POST', body: payload, authed: false });
+  const token = extractToken(data);
+  if (token) auth.setToken(token);
+  return data;
 }
 
 export async function logout() {
-  // TODO(django): await request('/auth/logout/', { method: 'POST' });
-  tokens.clear();
+  try {
+    await request('/logout/', { method: 'POST' });
+  } catch {
+    // A failed logout must never strand the user in a logged-in UI.
+  } finally {
+    auth.clearToken();
+  }
 }
 
-export async function getMe() {
-  // TODO(django): return request('/auth/me/');
-  await delay(150);
-  return MOCK_USER;
+export function getProfile() {
+  return request('/profile/');
 }
 
-export async function updateProfile(patch) {
-  // TODO(django): return request('/profile/', { method: 'PATCH', body: patch });
-  await delay();
-  return { ...MOCK_USER, ...patch };
+export function updateProfile(patch) {
+  return request('/profile/', { method: 'PATCH', body: patch });
 }
 
-/* ========================================================================== */
-/* WORKOUTS / CALENDAR                                                         */
-/* ========================================================================== */
-
-export async function getSessions({ start, end } = {}) {
-  // TODO(django): return request(`/workouts/?start=${start}&end=${end}`);
-  await delay(200);
-  const all = buildMockSessions();
-  if (!start || !end) return all;
-  return all.filter((s) => s.date >= start && s.date <= end);
+export function changePassword(payload) {
+  return request('/profile/change-password/', { method: 'POST', body: payload });
 }
 
-export async function createSession(session) {
-  // TODO(django): return request('/workouts/', { method: 'POST', body: session });
-  await delay(250);
-  return { ...session, id: Date.now() };
+/** @param file a File from an <input type="file"> */
+export function uploadProfilePicture(file, fieldName = 'profile_picture') {
+  const form = new FormData();
+  form.append(fieldName, file);
+  return request('/profile/upload-picture/', { method: 'POST', body: form });
 }
 
-export async function updateSession(id, patch) {
-  // TODO(django): return request(`/workouts/${id}/`, { method: 'PATCH', body: patch });
-  await delay(200);
-  return { id, ...patch };
-}
-
-export async function deleteSession(id) {
-  // TODO(django): return request(`/workouts/${id}/`, { method: 'DELETE' });
-  await delay(200);
-  return id;
+export async function deleteAccount() {
+  const result = await request('/profile/delete/', { method: 'DELETE' });
+  auth.clearToken();
+  return result;
 }
 
 /* ========================================================================== */
-/* STATS                                                                       */
+/* EXERCISES                                                                   */
 /* ========================================================================== */
 
-export async function getStats() {
-  // TODO(django): return request('/stats/summary/');
-  await delay(200);
-  return {
-    ...MOCK_STATS,
-    weeklyVolume: MOCK_WEEKLY_VOLUME,
-    personalBests: MOCK_PERSONAL_BESTS,
-    achievements: MOCK_ACHIEVEMENTS,
-    recentActivity: MOCK_RECENT_ACTIVITY,
-  };
+export async function listExercises(params = {}) {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== '' && v != null)
+  ).toString();
+  return unwrapList(await request(`/exercises/${qs ? `?${qs}` : ''}`));
+}
+
+export function createExercise(payload) {
+  return request('/exercises/create/', { method: 'POST', body: payload });
+}
+
+export function updateExercise(id, patch) {
+  return request(`/exercises/${id}/`, { method: 'PATCH', body: patch });
+}
+
+export function deleteExercise(id) {
+  return request(`/exercises/${id}/delete/`, { method: 'DELETE' });
+}
+
+/* ========================================================================== */
+/* SCHEDULE                                                                    */
+/* ========================================================================== */
+
+export async function listSchedule(params = {}) {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== '' && v != null)
+  ).toString();
+  return unwrapList(await request(`/schedule/${qs ? `?${qs}` : ''}`));
+}
+
+export function createScheduleEntry(payload) {
+  return request('/schedule/create/', { method: 'POST', body: payload });
+}
+
+/** NOTE: the backend exposes PUT (full replace), not PATCH — send the whole object. */
+export function updateScheduleEntry(id, payload) {
+  return request(`/schedule/${id}/`, { method: 'PUT', body: payload });
+}
+
+export function deleteScheduleEntry(id) {
+  return request(`/schedule/${id}/delete/`, { method: 'DELETE' });
 }

@@ -3,58 +3,72 @@ import * as api from '../utils/api';
 import { AuthContext } from './auth-context';
 
 /**
- * Minimal auth container. While the backend is mocked this simply keeps the
- * user in memory + localStorage. Once Django is live, `api.login` / `api.getMe`
- * become real calls and nothing in this file needs to change.
+ * Holds the signed-in user.
+ *
+ * On mount, if a DRF token is in localStorage we call GET /api/profile/ to
+ * confirm it is still valid and to load the user. A 401 clears the token.
  */
-
-const USER_KEY = 'fitpulse.user';
-
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(() => {
-    try {
-      const raw = localStorage.getItem(USER_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch {
-      return null;
-    }
-  });
-  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState(null);
+  // 'checking' until the initial /profile/ probe settles, so guarded routes
+  // don't bounce a logged-in user to /login on a hard refresh.
+  const [status, setStatus] = useState(() => (api.auth.isAuthenticated() ? 'checking' : 'anon'));
 
   useEffect(() => {
-    try {
-      if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
-      else localStorage.removeItem(USER_KEY);
-    } catch {
-      /* storage unavailable (private mode) — session-only auth is fine */
-    }
-  }, [user]);
+    if (!api.auth.isAuthenticated()) return undefined;
+
+    let cancelled = false;
+    api
+      .getProfile()
+      .then((me) => {
+        if (cancelled) return;
+        setUser(me);
+        setStatus('authed');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        api.auth.clearToken();
+        setStatus('anon');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const signIn = useCallback(async (credentials) => {
-    setLoading(true);
-    try {
-      const { user: u } = await api.login(credentials);
-      setUser(u);
-      return u;
-    } finally {
-      setLoading(false);
-    }
+    const data = await api.login(credentials);
+    // Some backends return the user with the token, some only the token.
+    const me = data?.user ?? (await api.getProfile());
+    setUser(me);
+    setStatus('authed');
+    return me;
   }, []);
 
   const signUp = useCallback(async (payload) => {
-    setLoading(true);
-    try {
-      const { user: u } = await api.register(payload);
-      setUser(u);
-      return u;
-    } finally {
-      setLoading(false);
+    const data = await api.register(payload);
+
+    // If registration did not hand back a token, the user must log in.
+    if (!api.auth.isAuthenticated()) {
+      setStatus('anon');
+      return null;
     }
+    const me = data?.user ?? (await api.getProfile());
+    setUser(me);
+    setStatus('authed');
+    return me;
   }, []);
 
   const signOut = useCallback(async () => {
     await api.logout();
     setUser(null);
+    setStatus('anon');
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    const me = await api.getProfile();
+    setUser(me);
+    return me;
   }, []);
 
   const patchUser = useCallback(async (patch) => {
@@ -63,9 +77,27 @@ export function AuthProvider({ children }) {
     return updated;
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    await api.deleteAccount();
+    setUser(null);
+    setStatus('anon');
+  }, []);
+
   return (
     <AuthContext.Provider
-      value={{ user, loading, signIn, signUp, signOut, patchUser, isAuthenticated: !!user }}
+      value={{
+        user,
+        setUser,
+        status,
+        loading: status === 'checking',
+        isAuthenticated: status === 'authed',
+        signIn,
+        signUp,
+        signOut,
+        refreshUser,
+        patchUser,
+        deleteAccount,
+      }}
     >
       {children}
     </AuthContext.Provider>

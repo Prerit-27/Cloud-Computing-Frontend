@@ -5,105 +5,103 @@ import {
   ChevronRight,
   Plus,
   Clock,
-  Flame,
-  Dumbbell,
   Check,
   Trash2,
   X,
   Loader2,
   CalendarDays,
+  Repeat,
+  AlertCircle,
+  RefreshCw,
+  Dumbbell,
 } from 'lucide-react';
 import * as api from '../utils/api';
-import { WORKOUT_TYPES, toISODate } from '../utils/mockData';
+import {
+  normalizeScheduleEntry,
+  toApiScheduleEntry,
+  toApiScheduleUpdate,
+  expandToRange,
+  toISODate,
+  exerciseFields as ex,
+} from '../utils/adapters';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-/** Builds a Monday-first 6x7 grid for the given month. */
+/** Monday-first 6x7 grid covering the given month. */
 function buildGrid(year, month) {
   const first = new Date(year, month, 1);
-  const offset = (first.getDay() + 6) % 7; // Mon = 0
+  const offset = (first.getDay() + 6) % 7;
   const start = new Date(year, month, 1 - offset);
 
   return Array.from({ length: 42 }, (_, i) => {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
-    return {
-      date: d,
-      iso: toISODate(d),
-      inMonth: d.getMonth() === month,
-    };
+    return { date: d, iso: toISODate(d), inMonth: d.getMonth() === month };
   });
 }
 
 const EMPTY_FORM = {
   title: '',
-  type: 'push',
   time: '18:00',
   duration: 60,
-  exercises: 5,
+  exerciseId: '',
+  sets: '',
+  reps: '',
   notes: '',
 };
+
+const inputCls =
+  'w-full h-12 px-4 rounded-xl bg-[#151515] border border-white/10 text-white outline-none transition focus:border-[#7CFF5B] focus:ring-1 focus:ring-[#7CFF5B] placeholder:text-white/25';
 
 export default function Calendar() {
   const today = useMemo(() => new Date(), []);
   const [cursor, setCursor] = useState(() => new Date(today.getFullYear(), today.getMonth(), 1));
-  const [sessions, setSessions] = useState([]);
+  const [entries, setEntries] = useState([]);
+  const [exercises, setExercises] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
   const [selectedIso, setSelectedIso] = useState(toISODate(today));
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
   const todayIso = toISODate(today);
 
-  // TODO(django): re-fetch per visible month range — GET /api/workouts/?start=&end=
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getSessions()
-      .then((data) => !cancelled && setSessions(data))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
+  // No state is set before the first await, so this is safe to call from an
+  // effect without triggering a cascading render.
+  const fetchEntries = useCallback(async () => {
+    try {
+      const raw = await api.listSchedule();
+      setEntries(raw.map(normalizeScheduleEntry));
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const grid = useMemo(() => buildGrid(year, month), [year, month]);
+  const load = useCallback(() => {
+    setLoading(true);
+    fetchEntries();
+  }, [fetchEntries]);
 
-  const byDate = useMemo(() => {
-    const map = new Map();
-    for (const s of sessions) {
-      if (!map.has(s.date)) map.set(s.date, []);
-      map.get(s.date).push(s);
-    }
-    return map;
-  }, [sessions]);
-
-  const selectedSessions = byDate.get(selectedIso) ?? [];
-
-  const monthStats = useMemo(() => {
-    const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
-    const inMonth = sessions.filter((s) => s.date.startsWith(prefix));
-    const done = inMonth.filter((s) => s.completed);
-    return {
-      planned: inMonth.length,
-      completed: done.length,
-      minutes: done.reduce((a, s) => a + s.duration, 0),
-      volume: done.reduce((a, s) => a + s.volumeKg, 0),
-    };
-  }, [sessions, year, month]);
-
-  const shiftMonth = (delta) => setCursor(new Date(year, month + delta, 1));
-  const goToday = () => {
-    setCursor(new Date(today.getFullYear(), today.getMonth(), 1));
-    setSelectedIso(todayIso);
-  };
+  useEffect(() => {
+    // Fetch on mount: no state is set until after the await, so there is no
+    // cascading render — the rule cannot see past the await boundary.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchEntries();
+    // The exercise list only populates the picker — a failure here is not fatal.
+    api.listExercises().then(setExercises).catch(() => {});
+  }, [fetchEntries]);
 
   useEffect(() => {
     if (!modalOpen) return undefined;
@@ -112,46 +110,101 @@ export default function Calendar() {
     return () => window.removeEventListener('keydown', onKey);
   }, [modalOpen]);
 
-  const openAdd = useCallback((iso) => {
+  const grid = useMemo(() => buildGrid(year, month), [year, month]);
+
+  /** Weekday-only entries are projected onto every matching day on screen. */
+  const visible = useMemo(() => {
+    if (!grid.length) return [];
+    return expandToRange(entries, grid[0].iso, grid[grid.length - 1].iso);
+  }, [entries, grid]);
+
+  const byDate = useMemo(() => {
+    const map = new Map();
+    for (const e of visible) {
+      if (!map.has(e.date)) map.set(e.date, []);
+      map.get(e.date).push(e);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    }
+    return map;
+  }, [visible]);
+
+  const selectedEntries = byDate.get(selectedIso) ?? [];
+
+  const monthStats = useMemo(() => {
+    const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+    const inMonth = visible.filter((e) => e.date.startsWith(prefix));
+    const done = inMonth.filter((e) => e.completed);
+    return {
+      planned: inMonth.length,
+      completed: done.length,
+      minutes: done.reduce((a, e) => a + (e.duration || 0), 0),
+    };
+  }, [visible, year, month]);
+
+  const shiftMonth = (delta) => setCursor(new Date(year, month + delta, 1));
+  const goToday = () => {
+    setCursor(new Date(today.getFullYear(), today.getMonth(), 1));
+    setSelectedIso(todayIso);
+  };
+
+  const openAdd = (iso) => {
     setSelectedIso(iso);
     setForm(EMPTY_FORM);
+    setFormError('');
     setModalOpen(true);
-  }, []);
+  };
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    if (!form.title.trim()) return;
+    if (!form.title.trim() && !form.exerciseId) {
+      setFormError('Give the session a name, or pick an exercise.');
+      return;
+    }
     setSaving(true);
+    setFormError('');
     try {
-      // TODO(django): POST /api/workouts/
-      const created = await api.createSession({
-        ...form,
-        date: selectedIso,
-        completed: false,
-        volumeKg: 0,
-        duration: Number(form.duration),
-        exercises: Number(form.exercises),
-      });
-      setSessions((prev) => [...prev, created]);
+      const chosen = exercises.find((x) => String(ex.id(x)) === String(form.exerciseId));
+      const created = await api.createScheduleEntry(
+        toApiScheduleEntry({
+          ...form,
+          date: selectedIso,
+          title: form.title.trim() || (chosen ? ex.name(chosen) : 'Workout'),
+        })
+      );
+      setEntries((prev) => [...prev, normalizeScheduleEntry(created)]);
       setModalOpen(false);
+    } catch (err) {
+      setFormError(err.message);
     } finally {
       setSaving(false);
     }
   };
 
-  const toggleComplete = async (session) => {
-    const next = !session.completed;
-    setSessions((prev) =>
-      prev.map((s) => (s.id === session.id ? { ...s, completed: next } : s))
-    );
-    // TODO(django): PATCH /api/workouts/:id/
-    await api.updateSession(session.id, { completed: next });
+  const toggleComplete = async (entry) => {
+    const next = !entry.completed;
+    setEntries((prev) => prev.map((e) => (e.id === entry.id ? { ...e, completed: next } : e)));
+    try {
+      // The backend exposes PUT, so the whole object is resent.
+      await api.updateScheduleEntry(entry.id, toApiScheduleUpdate(entry, { completed: next }));
+    } catch (err) {
+      setEntries((prev) =>
+        prev.map((e) => (e.id === entry.id ? { ...e, completed: entry.completed } : e))
+      );
+      setError(err.message);
+    }
   };
 
-  const removeSession = async (id) => {
-    setSessions((prev) => prev.filter((s) => s.id !== id));
-    // TODO(django): DELETE /api/workouts/:id/
-    await api.deleteSession(id);
+  const remove = async (entry) => {
+    const snapshot = entries;
+    setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+    try {
+      await api.deleteScheduleEntry(entry.id);
+    } catch (err) {
+      setEntries(snapshot);
+      setError(err.message);
+    }
   };
 
   const selectedLabel = new Date(`${selectedIso}T00:00:00`).toLocaleDateString(undefined, {
@@ -165,12 +218,8 @@ export default function Calendar() {
       {/* ================= HEADER ================= */}
       <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
         <div>
-          <p className="text-[11px] font-bold tracking-[0.18em] uppercase text-[#7CFF5B]">
-            Planner
-          </p>
-          <h1 className="mt-1.5 text-3xl lg:text-4xl font-bold tracking-tight">
-            Training Calendar
-          </h1>
+          <p className="text-[11px] font-bold tracking-[0.18em] uppercase text-[#7CFF5B]">Planner</p>
+          <h1 className="mt-1.5 text-3xl lg:text-4xl font-bold tracking-tight">My Calendar</h1>
           <p className="mt-2 text-[#B8B8B8]">
             Plan sessions, tick them off, and keep the streak alive.
           </p>
@@ -180,12 +229,26 @@ export default function Calendar() {
           className="flex items-center gap-2 px-5 py-3 rounded-xl bg-[#7CFF5B] text-[#070707] font-semibold hover:bg-[#91ff75] transition-all hover:scale-[1.02]"
         >
           <Plus className="w-4 h-4" strokeWidth={2.5} />
-          Add Workout
+          Add Session
         </button>
       </div>
 
+      {error && (
+        <div className="mb-6 flex items-start gap-3 p-4 rounded-2xl bg-[#FF5B5B]/10 border border-[#FF5B5B]/25">
+          <AlertCircle className="w-4 h-4 text-[#FF5B5B] shrink-0 mt-0.5" />
+          <p className="flex-1 text-sm text-[#FF8A8A] whitespace-pre-line">{error}</p>
+          <button
+            onClick={load}
+            className="flex items-center gap-1.5 text-xs font-semibold text-white/60 hover:text-white transition"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* ================= MONTH STATS ================= */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+      <div className="grid grid-cols-3 gap-3 mb-8">
         {[
           { label: 'Planned', value: monthStats.planned, icon: CalendarDays, color: '#5BE7FF' },
           { label: 'Completed', value: monthStats.completed, icon: Check, color: '#7CFF5B' },
@@ -195,17 +258,8 @@ export default function Calendar() {
             icon: Clock,
             color: '#B75BFF',
           },
-          {
-            label: 'Volume',
-            value: `${(monthStats.volume / 1000).toFixed(1)}t`,
-            icon: Flame,
-            color: '#FF5B8A',
-          },
         ].map(({ label, value, icon: Icon, color }) => (
-          <div
-            key={label}
-            className="p-4 rounded-2xl bg-[#101010] border border-white/[0.06]"
-          >
+          <div key={label} className="p-4 rounded-2xl bg-[#101010] border border-white/[0.06]">
             <div className="flex items-center gap-2 mb-2">
               <Icon className="w-3.5 h-3.5" style={{ color }} />
               <span className="text-xs text-white/40">{label}</span>
@@ -247,7 +301,7 @@ export default function Calendar() {
           </div>
 
           <div className="grid grid-cols-7 gap-1.5 mb-2">
-            {WEEKDAYS.map((d) => (
+            {WEEKDAY_LABELS.map((d) => (
               <div
                 key={d}
                 className="text-center text-[11px] font-bold tracking-wider uppercase text-white/30 py-1"
@@ -292,37 +346,30 @@ export default function Calendar() {
                     </span>
 
                     <div className="mt-1 space-y-0.5">
-                      {items.slice(0, 2).map((s) => {
-                        const t = WORKOUT_TYPES[s.type];
-                        return (
-                          <div
-                            key={s.id}
-                            className="hidden sm:block truncate text-[10px] font-medium px-1.5 py-0.5 rounded"
-                            style={{
-                              backgroundColor: `${t.color}1A`,
-                              color: s.completed ? t.color : `${t.color}B3`,
-                            }}
-                          >
-                            {s.title}
-                          </div>
-                        );
-                      })}
+                      {items.slice(0, 2).map((s) => (
+                        <div
+                          key={`${s.id}-${s.date}`}
+                          className={`hidden sm:block truncate text-[10px] font-medium px-1.5 py-0.5 rounded ${
+                            s.completed
+                              ? 'bg-[#7CFF5B]/20 text-[#7CFF5B]'
+                              : 'bg-white/[0.07] text-white/60'
+                          }`}
+                        >
+                          {s.title}
+                        </div>
+                      ))}
                       {items.length > 2 && (
                         <div className="hidden sm:block text-[10px] text-white/30 px-1.5">
                           +{items.length - 2} more
                         </div>
                       )}
 
-                      {/* Mobile: dots only */}
                       <div className="flex sm:hidden gap-0.5 flex-wrap">
                         {items.slice(0, 3).map((s) => (
                           <span
-                            key={s.id}
-                            className="w-1.5 h-1.5 rounded-full"
-                            style={{
-                              backgroundColor: WORKOUT_TYPES[s.type].color,
-                              opacity: s.completed ? 1 : 0.45,
-                            }}
+                            key={`${s.id}-${s.date}`}
+                            className="w-1.5 h-1.5 rounded-full bg-[#7CFF5B]"
+                            style={{ opacity: s.completed ? 1 : 0.4 }}
                           />
                         ))}
                       </div>
@@ -332,19 +379,6 @@ export default function Calendar() {
               })}
             </div>
           )}
-
-          {/* Legend */}
-          <div className="flex flex-wrap gap-3 mt-6 pt-5 border-t border-white/[0.06]">
-            {Object.entries(WORKOUT_TYPES).map(([key, t]) => (
-              <div key={key} className="flex items-center gap-1.5">
-                <span
-                  className="w-2.5 h-2.5 rounded-full"
-                  style={{ backgroundColor: t.color }}
-                />
-                <span className="text-xs text-white/45">{t.label}</span>
-              </div>
-            ))}
-          </div>
         </div>
 
         {/* ================= DAY PANEL ================= */}
@@ -358,14 +392,14 @@ export default function Calendar() {
             </div>
             <button
               onClick={() => openAdd(selectedIso)}
-              aria-label="Add workout to this day"
+              aria-label="Add a session to this day"
               className="w-9 h-9 shrink-0 grid place-items-center rounded-xl bg-[#7CFF5B]/12 border border-[#7CFF5B]/25 text-[#7CFF5B] hover:bg-[#7CFF5B]/20 transition"
             >
               <Plus className="w-4 h-4" strokeWidth={2.5} />
             </button>
           </div>
 
-          {selectedSessions.length === 0 ? (
+          {selectedEntries.length === 0 ? (
             <div className="py-10 text-center">
               <div className="w-12 h-12 mx-auto rounded-2xl bg-white/[0.04] grid place-items-center mb-3">
                 <CalendarDays className="w-5 h-5 text-white/25" />
@@ -380,75 +414,75 @@ export default function Calendar() {
             </div>
           ) : (
             <div className="space-y-3">
-              {selectedSessions.map((s) => {
-                const t = WORKOUT_TYPES[s.type];
-                return (
-                  <motion.div
-                    key={s.id}
-                    layout
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="group relative p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] overflow-hidden"
-                  >
-                    <span
-                      className="absolute left-0 inset-y-0 w-[3px]"
-                      style={{ backgroundColor: t.color }}
-                    />
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p
-                          className={`font-semibold truncate ${s.completed ? 'text-white/45 line-through' : ''}`}
-                        >
-                          {s.title}
-                        </p>
-                        <span
-                          className="inline-block mt-1.5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded"
-                          style={{ backgroundColor: `${t.color}1A`, color: t.color }}
-                        >
-                          {t.label}
-                        </span>
-                      </div>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition">
-                        <button
-                          onClick={() => toggleComplete(s)}
-                          aria-label={s.completed ? 'Mark incomplete' : 'Mark complete'}
-                          className={`w-7 h-7 grid place-items-center rounded-lg transition ${
-                            s.completed
-                              ? 'bg-[#7CFF5B] text-[#070707]'
-                              : 'bg-white/[0.06] text-white/50 hover:text-[#7CFF5B]'
-                          }`}
-                        >
-                          <Check className="w-3.5 h-3.5" strokeWidth={3} />
-                        </button>
-                        <button
-                          onClick={() => removeSession(s.id)}
-                          aria-label="Delete workout"
-                          className="w-7 h-7 grid place-items-center rounded-lg bg-white/[0.06] text-white/50 hover:text-[#FF5B5B] hover:bg-[#FF5B5B]/10 transition"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-white/40">
-                      <span className="flex items-center gap-1.5">
-                        <Clock className="w-3 h-3" />
-                        {s.time} · {s.duration} min
-                      </span>
-                      <span className="flex items-center gap-1.5">
-                        <Dumbbell className="w-3 h-3" />
-                        {s.exercises} exercises
-                      </span>
-                      {s.volumeKg > 0 && (
-                        <span className="flex items-center gap-1.5">
-                          <Flame className="w-3 h-3" />
-                          {s.volumeKg.toLocaleString()} kg
+              {selectedEntries.map((s) => (
+                <motion.div
+                  key={`${s.id}-${s.date}`}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="group relative p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] overflow-hidden"
+                >
+                  <span
+                    className="absolute left-0 inset-y-0 w-[3px]"
+                    style={{ backgroundColor: s.completed ? '#7CFF5B' : 'rgba(255,255,255,0.15)' }}
+                  />
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p
+                        className={`font-semibold truncate ${
+                          s.completed ? 'text-white/45 line-through' : ''
+                        }`}
+                      >
+                        {s.title}
+                      </p>
+                      {s.recurring && (
+                        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded bg-[#5BE7FF]/12 text-[#5BE7FF]">
+                          <Repeat className="w-2.5 h-2.5" />
+                          Weekly
                         </span>
                       )}
                     </div>
-                  </motion.div>
-                );
-              })}
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition">
+                      <button
+                        onClick={() => toggleComplete(s)}
+                        aria-label={s.completed ? 'Mark incomplete' : 'Mark complete'}
+                        className={`w-7 h-7 grid place-items-center rounded-lg transition ${
+                          s.completed
+                            ? 'bg-[#7CFF5B] text-[#070707]'
+                            : 'bg-white/[0.06] text-white/50 hover:text-[#7CFF5B]'
+                        }`}
+                      >
+                        <Check className="w-3.5 h-3.5" strokeWidth={3} />
+                      </button>
+                      <button
+                        onClick={() => remove(s)}
+                        aria-label="Delete session"
+                        className="w-7 h-7 grid place-items-center rounded-lg bg-white/[0.06] text-white/50 hover:text-[#FF5B5B] hover:bg-[#FF5B5B]/10 transition"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-white/40">
+                    {s.time && (
+                      <span className="flex items-center gap-1.5">
+                        <Clock className="w-3 h-3" />
+                        {s.time}
+                        {s.duration ? ` · ${s.duration} min` : ''}
+                      </span>
+                    )}
+                    {s.sets && s.reps && (
+                      <span className="flex items-center gap-1.5">
+                        <Dumbbell className="w-3 h-3" />
+                        {s.sets} × {s.reps}
+                      </span>
+                    )}
+                  </div>
+
+                  {s.notes && <p className="mt-2 text-xs text-white/35">{s.notes}</p>}
+                </motion.div>
+              ))}
             </div>
           )}
         </aside>
@@ -474,7 +508,7 @@ export default function Calendar() {
             >
               <div className="flex items-start justify-between mb-6">
                 <div>
-                  <h3 className="text-xl font-bold">Add Workout</h3>
+                  <h3 className="text-xl font-bold">Add Session</h3>
                   <p className="mt-1 text-sm text-white/40">{selectedLabel}</p>
                 </div>
                 <button
@@ -487,70 +521,87 @@ export default function Calendar() {
                 </button>
               </div>
 
+              {formError && (
+                <div className="mb-5 flex gap-3 p-4 rounded-xl bg-[#FF5B5B]/10 border border-[#FF5B5B]/25">
+                  <AlertCircle className="w-4 h-4 text-[#FF5B5B] shrink-0 mt-0.5" />
+                  <p className="text-sm text-[#FF8A8A] whitespace-pre-line">{formError}</p>
+                </div>
+              )}
+
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm text-white/60 mb-2">Workout name</label>
+                  <label className="block text-sm text-white/60 mb-2">Session name</label>
                   <input
                     autoFocus
                     value={form.title}
                     onChange={(e) => setForm({ ...form, title: e.target.value })}
                     placeholder="e.g. Push Day A"
-                    required
-                    className="w-full h-12 px-4 rounded-xl bg-[#151515] border border-white/10 outline-none focus:border-[#7CFF5B] focus:ring-1 focus:ring-[#7CFF5B] transition placeholder:text-white/25"
+                    className={inputCls}
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm text-white/60 mb-2">Type</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {Object.entries(WORKOUT_TYPES).map(([key, t]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => setForm({ ...form, type: key })}
-                        className="px-2 py-2.5 rounded-xl text-xs font-semibold border transition-all"
-                        style={{
-                          borderColor: form.type === key ? t.color : 'rgba(255,255,255,0.10)',
-                          backgroundColor: form.type === key ? `${t.color}1A` : 'transparent',
-                          color: form.type === key ? t.color : 'rgba(255,255,255,0.55)',
-                        }}
-                      >
-                        {t.label}
-                      </button>
-                    ))}
+                {exercises.length > 0 && (
+                  <div>
+                    <label className="block text-sm text-white/60 mb-2">Exercise (optional)</label>
+                    <select
+                      value={form.exerciseId}
+                      onChange={(e) => setForm({ ...form, exerciseId: e.target.value })}
+                      className={`${inputCls} appearance-none cursor-pointer`}
+                    >
+                      <option value="">— none —</option>
+                      {exercises.map((x) => (
+                        <option key={ex.id(x)} value={ex.id(x)}>
+                          {ex.name(x)}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                </div>
+                )}
 
-                <div className="grid grid-cols-[1.4fr_1fr_1fr] gap-3">
+                <div className="grid grid-cols-[1.4fr_1fr] gap-3">
                   <div>
                     <label className="block text-sm text-white/60 mb-2">Time</label>
                     <input
                       type="time"
                       value={form.time}
                       onChange={(e) => setForm({ ...form, time: e.target.value })}
-                      className="w-full h-12 px-3 rounded-xl bg-[#151515] border border-white/10 outline-none focus:border-[#7CFF5B] transition [color-scheme:dark]"
+                      className={`${inputCls} [color-scheme:dark]`}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm text-white/60 mb-2">Mins</label>
+                    <label className="block text-sm text-white/60 mb-2">Minutes</label>
                     <input
                       type="number"
                       min="5"
                       max="300"
                       value={form.duration}
                       onChange={(e) => setForm({ ...form, duration: e.target.value })}
-                      className="w-full h-12 px-3 rounded-xl bg-[#151515] border border-white/10 outline-none focus:border-[#7CFF5B] transition"
+                      className={inputCls}
                     />
                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-sm text-white/60 mb-2">Exercises</label>
+                    <label className="block text-sm text-white/60 mb-2">Sets</label>
                     <input
                       type="number"
                       min="1"
-                      max="30"
-                      value={form.exercises}
-                      onChange={(e) => setForm({ ...form, exercises: e.target.value })}
-                      className="w-full h-12 px-3 rounded-xl bg-[#151515] border border-white/10 outline-none focus:border-[#7CFF5B] transition"
+                      value={form.sets}
+                      onChange={(e) => setForm({ ...form, sets: e.target.value })}
+                      placeholder="3"
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-white/60 mb-2">Reps</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={form.reps}
+                      onChange={(e) => setForm({ ...form, reps: e.target.value })}
+                      placeholder="10"
+                      className={inputCls}
                     />
                   </div>
                 </div>
@@ -562,7 +613,7 @@ export default function Calendar() {
                     value={form.notes}
                     onChange={(e) => setForm({ ...form, notes: e.target.value })}
                     placeholder="Focus points, target weights…"
-                    className="w-full px-4 py-3 rounded-xl bg-[#151515] border border-white/10 outline-none focus:border-[#7CFF5B] transition resize-none placeholder:text-white/25"
+                    className={`${inputCls} h-auto py-3 resize-none`}
                   />
                 </div>
               </div>
@@ -581,7 +632,7 @@ export default function Calendar() {
                   className="flex-1 h-12 rounded-xl bg-[#7CFF5B] text-[#070707] font-bold hover:bg-[#91ff75] transition disabled:opacity-60 flex items-center justify-center gap-2"
                 >
                   {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {saving ? 'Saving…' : 'Add Workout'}
+                  {saving ? 'Saving…' : 'Add Session'}
                 </button>
               </div>
             </motion.form>

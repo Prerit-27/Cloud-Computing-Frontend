@@ -1,12 +1,15 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { Dumbbell, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../context/auth-context';
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { signIn } = useAuth();
 
+  // Django's default auth is username-based; this field accepts either and is
+  // sent under both keys so it works whichever your serializer expects.
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -17,9 +20,8 @@ export default function Login() {
     setError("");
     setSubmitting(true);
     try {
-      // TODO(django): POST /api/auth/login/ — see utils/api.js
-      await signIn({ email, password });
-      navigate("/app/dashboard");
+      await signIn({ username: email, email, password });
+      navigate(location.state?.from ?? "/app/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Could not sign you in. Check your details and try again.");
     } finally {

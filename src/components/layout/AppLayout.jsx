@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   CalendarDays,
   User,
+  ListChecks,
   Activity,
   Settings,
   LogOut,
@@ -13,12 +14,12 @@ import {
   Home,
 } from 'lucide-react';
 import { useAuth } from '../../context/auth-context';
-import { MOCK_USER } from '../../utils/mockData';
-import { initialsOf } from '../../utils/format';
+import { initialsOf, displayName, userFields, mediaUrl } from '../../utils/adapters';
 
 const NAV = [
   { to: '/app/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/app/calendar', label: 'Calendar', icon: CalendarDays },
+  { to: '/app/exercises', label: 'Exercises', icon: ListChecks },
   { to: '/app/profile', label: 'Profile', icon: User },
 ];
 
@@ -32,8 +33,6 @@ export default function AppLayout() {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
 
-  // Falls back to mock data so the pages are viewable without logging in.
-  const current = user ?? MOCK_USER;
 
   const handleSignOut = async () => {
     await signOut();
@@ -106,14 +105,20 @@ export default function AppLayout() {
       {/* User card */}
       <div className="p-3 border-t border-white/[0.06]">
         <div className="flex items-center gap-3 px-3 py-3 rounded-xl bg-white/[0.03]">
-          <div className="w-9 h-9 shrink-0 rounded-full bg-gradient-to-br from-[#7CFF5B] to-[#5BE7FF] grid place-items-center text-[#070707] text-sm font-bold">
-            {initialsOf(current)}
+          <div className="w-9 h-9 shrink-0 rounded-full bg-gradient-to-br from-[#7CFF5B] to-[#5BE7FF] grid place-items-center text-[#070707] text-sm font-bold overflow-hidden">
+            {mediaUrl(userFields.avatar(user)) ? (
+              <img
+                src={mediaUrl(userFields.avatar(user))}
+                alt=""
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              initialsOf(user)
+            )}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold truncate">
-              {current.firstName} {current.lastName}
-            </p>
-            <p className="text-xs text-white/35 truncate">{current.email}</p>
+            <p className="text-sm font-semibold truncate">{displayName(user)}</p>
+            <p className="text-xs text-white/35 truncate">{userFields.email(user)}</p>
           </div>
         </div>
         <div className="flex gap-1 mt-1">

@@ -7,8 +7,10 @@ import Login from './components/Navbar/Login';
 import Signup from './pages/Signup';
 
 import AppLayout from './components/layout/AppLayout';
+import RequireAuth from './components/layout/RequireAuth';
 import Dashboard from './pages/Dashboard';
 import Calendar from './pages/Calendar';
+import Exercises from './pages/Exercises';
 import Profile from './pages/Profile';
 
 export default function App() {
@@ -23,12 +25,19 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/signup" element={<Signup />} />
 
-          {/* Authenticated app shell.
-              TODO(django): wrap in a <RequireAuth> guard once JWT login is live. */}
-          <Route path="/app" element={<AppLayout />}>
+          {/* Authenticated app */}
+          <Route
+            path="/app"
+            element={
+              <RequireAuth>
+                <AppLayout />
+              </RequireAuth>
+            }
+          >
             <Route index element={<Navigate to="/app/dashboard" replace />} />
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="calendar" element={<Calendar />} />
+            <Route path="exercises" element={<Exercises />} />
             <Route path="profile" element={<Profile />} />
           </Route>
 

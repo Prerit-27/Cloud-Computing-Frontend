@@ -75,18 +75,30 @@ export default function Signup() {
 
     setSubmitting(true);
     try {
-      // TODO(django): POST /api/auth/register/ — see utils/api.js
-      await signUp({
-        firstName: form.firstName,
-        lastName: form.lastName,
+      const me = await signUp({
+        username: form.email.split('@')[0],
+        first_name: form.firstName,
+        last_name: form.lastName,
         email: form.email,
         password: form.password,
-        primaryGoal: form.goal,
+        password2: form.password,
+        confirm_password: form.password,
+        goal: form.goal,
         experience: form.experience,
       });
-      navigate('/app/dashboard');
+
+      // If /api/register/ does not return a token, send them to log in.
+      navigate(me ? '/app/dashboard' : '/login', { replace: true });
     } catch (err) {
       setServerError(err.message || 'Something went wrong. Please try again.');
+      // Map DRF field errors onto the matching inputs.
+      const f = err.fields ?? {};
+      setErrors({
+        email: f.email,
+        password: f.password,
+        firstName: f.first_name,
+        confirm: f.password2 ?? f.confirm_password,
+      });
     } finally {
       setSubmitting(false);
     }

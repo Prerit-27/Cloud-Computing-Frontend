@@ -1,97 +1,123 @@
-# FitPulse — Frontend additions
+# FitPulse frontend — wired to your Django API
 
-New pages and components added on top of the existing landing page, ready for a
-Django backend.
+Every endpoint from `/api/schema/` now has UI behind it.
+
+## Setup
+
+```bash
+npm install
+echo "VITE_API_URL=http://127.0.0.1:8000/api" > .env
+npm run dev
+```
+
+Your Django server needs `django-cors-headers` allowing the Vite origin
+(`http://localhost:5173`), otherwise every request fails in the browser.
 
 ## Routes
 
-| Route | File | Notes |
+| Route | Auth | Endpoints used |
 |---|---|---|
-| `/` | `src/pages/Home.jsx` | Landing page (unchanged except the muscle section) |
-| `/login` | `src/components/Navbar/Login.jsx` | Now wired to auth + error/loading states |
-| `/signup` | `src/pages/Signup.jsx` | **New** — validation, password strength, goal & experience pickers |
-| `/app/dashboard` | `src/pages/Dashboard.jsx` | **New** — stats, weekly volume, upcoming sessions |
-| `/app/calendar` | `src/pages/Calendar.jsx` | **New** — month grid, day panel, add/complete/delete |
-| `/app/profile` | `src/pages/Profile.jsx` | **New** — 4 tabs: Overview, Personal Info, Training, Account |
+| `/` | public | — (landing page) |
+| `/login` | public | `POST /api/login/` |
+| `/signup` | public | `POST /api/register/` |
+| `/app/dashboard` | required | `GET /api/schedule/`, `GET /api/exercises/` |
+| `/app/calendar` | required | all 4 `schedule` endpoints |
+| `/app/exercises` | required | all 4 `exercises` endpoints |
+| `/app/profile` | required | `GET`/`PATCH /api/profile/`, `change-password/`, `upload-picture/`, `delete/` |
 
-`/app/*` renders inside `src/components/layout/AppLayout.jsx` (sidebar shell,
-mobile drawer, user card, logout).
+`/app/*` is wrapped in `RequireAuth`, which shows a spinner while the stored
+token is verified against `GET /api/profile/`, then redirects to `/login` if
+that fails. Logging in returns you to the page you were trying to reach.
 
-## Muscle body map
+## Auth
 
-`src/components/MuscleGroup/BodyMap.jsx` + `src/utils/muscleData.js` replace the
-old Unsplash photo with a hand-drawn SVG figure.
+DRF `TokenAuthentication`. The token from `/api/login/` or `/api/register/` is
+stored in `localStorage` and sent as `Authorization: Token <key>` on every
+request. Any `401` clears it and bounces to login.
 
-- Front and back views, each with its own muscle set.
-- Every muscle is one left-half path mirrored around `x = 120`, so the two sides
-  can never drift apart. Edit one path, both sides update.
-- Hover highlights, click opens the detail panel (function, exercises, tip).
-- Reused at a smaller size on Dashboard ("Muscle Coverage") and Profile
-  ("Body Focus") via `showLabels={false}`.
+`extractToken()` in `api.js` accepts `token`, `key`, `auth_token` or `access`,
+so it works whichever key your serializer returns. If registration does not
+return a token, the user is sent to `/login` instead of the dashboard.
 
-To add a muscle: append an entry to `FRONT_MUSCLES` / `BACK_MUSCLES` and a
-matching key in `MUSCLE_LIBRARY`.
+## >> The one file to check: `src/utils/adapters.js` <<
 
-## Connecting Django
+I did not have your serializer fields, so **every field-name guess lives in
+`src/utils/adapters.js` and nowhere else.** Components call helpers like
+`exerciseFields.name(item)`; they never touch raw API keys.
 
-Everything server-related goes through **`src/utils/api.js`**. Each function has
-a `TODO(django)` comment naming the endpoint it should call and a commented-out
-`request(...)` line — delete the mock return and uncomment.
-
-```
-POST   /api/auth/register/        -> { user, access, refresh }
-POST   /api/auth/login/           -> { user, access, refresh }
-POST   /api/auth/logout/
-GET    /api/auth/me/              -> user
-PATCH  /api/profile/              -> user
-GET    /api/workouts/?start=&end= -> [session]
-POST   /api/workouts/             -> session
-PATCH  /api/workouts/:id/         -> session
-DELETE /api/workouts/:id/
-GET    /api/stats/summary/        -> stats
-```
-
-Set the base URL in `.env`:
-
-```
-VITE_API_URL=http://127.0.0.1:8000/api
-```
-
-JWT access/refresh tokens are stored via the `tokens` helper in `api.js` and
-attached automatically by `request()`. DRF error payloads
-(`{detail: ...}` and `{field: [...]}`) are unwrapped into `Error.message`.
-
-Auth state lives in `src/context/AuthContext.jsx` (provider) and
-`src/context/auth-context.js` (context + `useAuth` hook).
-
-Once login is real, guard the app shell:
-
-```jsx
-<Route path="/app" element={<RequireAuth><AppLayout /></RequireAuth>}>
-```
-
-Mock data is all in `src/utils/mockData.js` — delete that file once the API is live.
-
-## Session/workout shape
+Reads are forgiving — each getter tries several plausible names and returns the
+first present, so a wrong guess shows an empty value instead of crashing:
 
 ```js
-{
-  id: 1,
-  date: '2026-09-12',     // plain YYYY-MM-DD, maps to a Django DateField
-  title: 'Push Day A',
-  type: 'push',           // push | pull | legs | upper | cardio | rest
-  time: '06:30',
-  duration: 65,           // minutes
-  exercises: 6,
-  volumeKg: 8200,
-  completed: true,
-}
+name: (e) => pick(e, 'name', 'title', 'exercise_name') ?? 'Untitled exercise',
 ```
 
-## Bug fixed along the way
+Writes must be exact. These are the ones to verify against your schema:
 
-`src/index.css` had an unlayered `* { padding: 0 }` reset. Unlayered CSS
-outranks Tailwind's `utilities` layer, so that rule was silently cancelling
-**every** `p-*` / `px-*` / `py-*` class across the whole site — buttons and nav
-links were rendering with no padding. The reset now lives inside `@layer base`.
-The landing page will look noticeably better spaced as a result.
+- `toApiProfile()` — assumes `first_name`, `last_name`, `bio`, `location`,
+  `date_of_birth`, `height`, `weight`
+- `toApiPasswordChange()` — assumes `old_password`, `new_password`,
+  `confirm_password`
+- `toApiExercise()` — assumes `name`, `description`, `category`, `equipment`,
+  `difficulty`, `sets`, `reps`
+- `toApiScheduleEntry()` — assumes `title`, `date`, `time`, `duration`,
+  `exercise`, `sets`, `reps`, `notes`
+- `PROFILE_PICTURE_FIELD` — the multipart field name, currently
+  `profile_picture`
+- `EXERCISE_CATEGORIES` — placeholder values; replace with your real
+  `CategoryEnum`
+
+Paste your schema and I'll trim these to the exact names.
+
+### Two deliberate hedges
+
+**Schedule shape.** I could not tell whether a schedule row is date-based or
+weekday-based, so the calendar handles both. `normalizeScheduleEntry()` reads
+whichever is present; `expandToRange()` repeats a weekday-only row on every
+matching day so a weekly template still fills the month (those render with a
+"Weekly" badge). `toApiScheduleEntry()` sends **both** `date` and `day_of_week`
+— delete whichever your serializer rejects.
+
+**PUT, not PATCH.** Your schedule update is `PUT`, which replaces the whole
+object, so `toApiScheduleUpdate()` spreads the original payload and overrides
+only what changed. It also converts a nested `exercise` object back to its id,
+since a read serializer that nests will not accept a nested write.
+
+## No stats endpoint
+
+There is no `/api/stats/`, so the dashboard derives its numbers client-side in
+`deriveStats()` — streak, sessions completed, minutes trained, and the weekly
+chart, all computed from `GET /api/schedule/`. If you add a stats endpoint
+later, replace that one function.
+
+## Errors
+
+`request()` raises `ApiError` with `.message`, `.status` and `.fields`.
+DRF bodies in both shapes (`{detail: "..."}` and `{field: ["..."]}`) are
+unwrapped, so `{"email": ["This field must be unique."]}` renders under the
+email input on the signup form rather than as a raw blob.
+
+A failed request never leaves the UI in a lying state: list pages show an
+inline error with a Retry button, and optimistic updates (completing a session,
+deleting an exercise) roll back if the server rejects them.
+
+## Testing without the backend
+
+`/tmp/stub/server.py` in this session was a throwaway stand-in that implements
+these exact routes. Not included here — point `VITE_API_URL` at your real
+server.
+
+## Bugs fixed along the way
+
+1. **`index.css` reset killed all padding.** An unlayered `* { padding: 0 }`
+   outranks Tailwind's `utilities` layer, so every `p-*`/`px-*`/`py-*` class in
+   the app was being cancelled — buttons and nav links rendered with no padding.
+   The reset now sits in `@layer base`. This visibly changes the landing page
+   spacing (for the better).
+
+2. **Profile cover glow blocked clicks.** The decorative blur circle overflows
+   the header and was intercepting pointer events on the Edit Profile button,
+   making it unclickable. Added `pointer-events-none`.
+
+3. **Zero-height chart bars.** The weekly chart columns had no height to fill,
+   so bars rendered at 0px. Added `h-full` to the flex column.

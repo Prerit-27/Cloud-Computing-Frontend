@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Camera,
@@ -7,100 +8,206 @@ import {
   Pencil,
   Check,
   X,
-  Flame,
-  Trophy,
-  Zap,
-  Medal,
-  Sunrise,
-  Dumbbell,
-  TrendingUp,
-  Clock,
-  Target,
   Loader2,
+  AlertCircle,
+  Trash2,
+  KeyRound,
 } from 'lucide-react';
 import * as api from '../utils/api';
 import { useAuth } from '../context/auth-context';
-import { MOCK_USER } from '../utils/mockData';
-import BodyMap from '../components/MuscleGroup/BodyMap';
-import { initialsOf } from '../utils/format';
+import {
+  userFields as uf,
+  displayName,
+  initialsOf,
+  mediaUrl,
+  toApiProfile,
+  toApiPasswordChange,
+} from '../utils/adapters';
 
-const TABS = ['Overview', 'Personal Info', 'Training', 'Account'];
-
-const GOAL_LABELS = {
-  build_muscle: 'Build Muscle',
-  lose_fat: 'Lose Fat',
-  strength: 'Get Stronger',
-  endurance: 'Endurance',
-};
-
-const ACHIEVEMENT_ICONS = {
-  flame: Flame,
-  trophy: Trophy,
-  zap: Zap,
-  medal: Medal,
-  sunrise: Sunrise,
-  calendar: CalendarDays,
-};
-
-function Field({ label, children }) {
-  return (
-    <div>
-      <label className="block text-sm text-white/50 mb-2">{label}</label>
-      {children}
-    </div>
-  );
-}
+const TABS = ['Personal Info', 'Security', 'Account'];
 
 const inputCls =
   'w-full h-12 px-4 rounded-xl bg-[#151515] border border-white/10 text-white outline-none transition focus:border-[#7CFF5B] focus:ring-1 focus:ring-[#7CFF5B] disabled:opacity-50 disabled:cursor-not-allowed placeholder:text-white/25';
 
+function Field({ label, error, children }) {
+  return (
+    <div>
+      <label className="block text-sm text-white/50 mb-2">{label}</label>
+      {children}
+      {error && <p className="mt-1.5 text-xs text-[#FF5B5B]">{error}</p>}
+    </div>
+  );
+}
+
+function Banner({ kind = 'error', children }) {
+  const ok = kind === 'success';
+  return (
+    <div
+      className={`mb-5 flex gap-3 p-4 rounded-xl border ${
+        ok
+          ? 'bg-[#7CFF5B]/10 border-[#7CFF5B]/25'
+          : 'bg-[#FF5B5B]/10 border-[#FF5B5B]/25'
+      }`}
+    >
+      {ok ? (
+        <Check className="w-4 h-4 text-[#7CFF5B] shrink-0 mt-0.5" strokeWidth={3} />
+      ) : (
+        <AlertCircle className="w-4 h-4 text-[#FF5B5B] shrink-0 mt-0.5" />
+      )}
+      <p className={`text-sm whitespace-pre-line ${ok ? 'text-[#7CFF5B]' : 'text-[#FF8A8A]'}`}>
+        {children}
+      </p>
+    </div>
+  );
+}
+
 export default function Profile() {
-  const { user, patchUser } = useAuth();
-  const base = user ?? MOCK_USER;
+  const navigate = useNavigate();
+  const { user, patchUser, setUser, deleteAccount } = useAuth();
+  const fileRef = useRef(null);
 
-  const [tab, setTab] = useState('Overview');
+  const [tab, setTab] = useState('Personal Info');
+
+  // ---- profile form ----
   const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({});
   const [saving, setSaving] = useState(false);
+  const [profileError, setProfileError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
   const [savedFlash, setSavedFlash] = useState(false);
-  const [draft, setDraft] = useState(base);
-  const [stats, setStats] = useState(null);
 
-  useEffect(() => {
-    // TODO(django): GET /api/stats/summary/
-    api.getStats().then(setStats);
-  }, []);
+  // ---- avatar ----
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+
+  // ---- password ----
+  const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
+  const [pwState, setPwState] = useState({ saving: false, error: '', done: false });
+
+  // ---- delete ----
+  const [confirmText, setConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+
+  if (!user) {
+    return (
+      <div className="py-24 grid place-items-center text-white/30">
+        <Loader2 className="w-6 h-6 animate-spin" />
+      </div>
+    );
+  }
+
+  const startEdit = () => {
+    setDraft({
+      firstName: uf.firstName(user),
+      lastName: uf.lastName(user),
+      username: uf.username(user),
+      email: uf.email(user),
+      bio: uf.bio(user),
+      location: uf.location(user),
+      dateOfBirth: uf.dateOfBirth(user),
+      height: uf.height(user) ?? '',
+      weight: uf.weight(user) ?? '',
+    });
+    setProfileError('');
+    setFieldErrors({});
+    setEditing(true);
+  };
 
   const set = (key) => (e) => setDraft((d) => ({ ...d, [key]: e.target.value }));
 
-  const save = async () => {
+  const saveProfile = async () => {
     setSaving(true);
+    setProfileError('');
+    setFieldErrors({});
     try {
-      // TODO(django): PATCH /api/profile/
-      if (user) await patchUser(draft);
+      await patchUser(toApiProfile(draft));
       setEditing(false);
       setSavedFlash(true);
-      setTimeout(() => setSavedFlash(false), 2200);
+      setTimeout(() => setSavedFlash(false), 2500);
+    } catch (err) {
+      setProfileError(err.message);
+      setFieldErrors(err.fields ?? {});
     } finally {
       setSaving(false);
     }
   };
 
-  const cancel = () => {
-    setDraft(base);
-    setEditing(false);
+  const onPickFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setUploadError('Please choose an image file.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('Image must be under 5 MB.');
+      return;
+    }
+
+    setUploading(true);
+    setUploadError('');
+    try {
+      const updated = await api.uploadProfilePicture(file);
+      // The endpoint may return the whole user or just the image path.
+      if (updated && typeof updated === 'object' && (updated.id || updated.username)) {
+        setUser(updated);
+      } else {
+        setUser(await api.getProfile());
+      }
+    } catch (err) {
+      setUploadError(err.message);
+    } finally {
+      setUploading(false);
+    }
   };
 
-  const bmi = draft.heightCm ? (draft.weightKg / (draft.heightCm / 100) ** 2).toFixed(1) : '—';
-  const weightProgress = Math.min(
-    100,
-    Math.round((draft.weightKg / (draft.goalWeightKg || draft.weightKg)) * 100)
-  );
+  const submitPassword = async (e) => {
+    e.preventDefault();
+    if (pw.next !== pw.confirm) {
+      setPwState({ saving: false, error: 'New passwords do not match.', done: false });
+      return;
+    }
+    if (pw.next.length < 8) {
+      setPwState({ saving: false, error: 'New password must be at least 8 characters.', done: false });
+      return;
+    }
+
+    setPwState({ saving: true, error: '', done: false });
+    try {
+      await api.changePassword(toApiPasswordChange(pw));
+      setPw({ current: '', next: '', confirm: '' });
+      setPwState({ saving: false, error: '', done: true });
+      setTimeout(() => setPwState((s) => ({ ...s, done: false })), 3000);
+    } catch (err) {
+      setPwState({ saving: false, error: err.message, done: false });
+    }
+  };
+
+  const confirmDelete = async () => {
+    setDeleting(true);
+    setDeleteError('');
+    try {
+      await deleteAccount();
+      navigate('/');
+    } catch (err) {
+      setDeleteError(err.message);
+      setDeleting(false);
+    }
+  };
+
+  const avatar = mediaUrl(uf.avatar(user));
+  const joined = uf.dateJoined(user);
 
   return (
     <div>
       {/* ================= COVER + IDENTITY ================= */}
       <div className="relative rounded-3xl overflow-hidden border border-white/[0.06] mb-6">
-        <div className="h-36 sm:h-44 bg-gradient-to-br from-[#7CFF5B]/25 via-[#5BE7FF]/12 to-transparent relative">
+        {/* Decorative only. The blur circle overflows the header, so without
+            pointer-events-none it sits on top of the buttons below it. */}
+        <div className="h-36 sm:h-44 bg-gradient-to-br from-[#7CFF5B]/25 via-[#5BE7FF]/12 to-transparent relative pointer-events-none">
           <div className="absolute inset-0 bg-[#070707]/35" />
           <div className="absolute -top-20 -right-10 w-80 h-80 rounded-full bg-[#7CFF5B]/20 blur-[100px]" />
         </div>
@@ -108,20 +215,30 @@ export default function Profile() {
         <div className="bg-[#101010] px-6 sm:px-8 pb-7">
           <div className="flex flex-wrap items-end gap-5 -mt-14">
             <div className="relative">
-              <div className="w-28 h-28 rounded-3xl bg-gradient-to-br from-[#7CFF5B] to-[#5BE7FF] grid place-items-center text-[#070707] text-3xl font-black ring-4 ring-[#101010]">
-                {base.avatar ? (
-                  <img
-                    src={base.avatar}
-                    alt=""
-                    className="w-full h-full object-cover rounded-3xl"
-                  />
+              <div className="w-28 h-28 rounded-3xl bg-gradient-to-br from-[#7CFF5B] to-[#5BE7FF] grid place-items-center text-[#070707] text-3xl font-black ring-4 ring-[#101010] overflow-hidden">
+                {avatar ? (
+                  <img src={avatar} alt="" className="w-full h-full object-cover" />
                 ) : (
-                  initialsOf(base)
+                  initialsOf(user)
+                )}
+                {uploading && (
+                  <div className="absolute inset-0 bg-black/60 grid place-items-center">
+                    <Loader2 className="w-5 h-5 animate-spin text-white" />
+                  </div>
                 )}
               </div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                onChange={onPickFile}
+                className="sr-only"
+              />
               <button
-                aria-label="Change photo"
-                className="absolute -bottom-1 -right-1 w-9 h-9 grid place-items-center rounded-xl bg-[#181818] border border-white/10 text-white/60 hover:text-white transition"
+                onClick={() => fileRef.current?.click()}
+                disabled={uploading}
+                aria-label="Change profile picture"
+                className="absolute -bottom-1 -right-1 w-9 h-9 grid place-items-center rounded-xl bg-[#181818] border border-white/10 text-white/60 hover:text-white transition disabled:opacity-50"
               >
                 <Camera className="w-4 h-4" />
               </button>
@@ -129,26 +246,28 @@ export default function Profile() {
 
             <div className="flex-1 min-w-[200px] pt-2">
               <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">
-                {base.firstName} {base.lastName}
+                {displayName(user)}
               </h1>
-              <p className="text-white/40 text-sm mt-0.5">@{base.username}</p>
+              {uf.username(user) && (
+                <p className="text-white/40 text-sm mt-0.5">@{uf.username(user)}</p>
+              )}
               <div className="flex flex-wrap gap-4 mt-3 text-sm text-white/45">
-                <span className="flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5" />
-                  {base.location}
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <CalendarDays className="w-3.5 h-3.5" />
-                  Joined{' '}
-                  {new Date(base.joinedAt).toLocaleDateString(undefined, {
-                    month: 'long',
-                    year: 'numeric',
-                  })}
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <Target className="w-3.5 h-3.5" />
-                  {GOAL_LABELS[base.primaryGoal]}
-                </span>
+                {uf.location(user) && (
+                  <span className="flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5" />
+                    {uf.location(user)}
+                  </span>
+                )}
+                {joined && (
+                  <span className="flex items-center gap-1.5">
+                    <CalendarDays className="w-3.5 h-3.5" />
+                    Joined{' '}
+                    {new Date(joined).toLocaleDateString(undefined, {
+                      month: 'long',
+                      year: 'numeric',
+                    })}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -156,14 +275,14 @@ export default function Profile() {
               {editing ? (
                 <div className="flex gap-2">
                   <button
-                    onClick={cancel}
+                    onClick={() => setEditing(false)}
                     className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-white/70 text-sm font-medium hover:bg-white/[0.04] transition"
                   >
                     <X className="w-4 h-4" />
                     Cancel
                   </button>
                   <button
-                    onClick={save}
+                    onClick={saveProfile}
                     disabled={saving}
                     className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#7CFF5B] text-[#070707] text-sm font-bold hover:bg-[#91ff75] transition disabled:opacity-60"
                   >
@@ -177,7 +296,10 @@ export default function Profile() {
                 </div>
               ) : (
                 <button
-                  onClick={() => setEditing(true)}
+                  onClick={() => {
+                    setTab('Personal Info');
+                    startEdit();
+                  }}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white/[0.06] border border-white/10 text-sm font-semibold hover:bg-white/[0.10] transition"
                 >
                   <Pencil className="w-3.5 h-3.5" />
@@ -187,7 +309,11 @@ export default function Profile() {
             </div>
           </div>
 
-          <p className="mt-5 text-[#B8B8B8] max-w-2xl leading-relaxed">{base.bio}</p>
+          {uf.bio(user) && (
+            <p className="mt-5 text-[#B8B8B8] max-w-2xl leading-relaxed">{uf.bio(user)}</p>
+          )}
+
+          {uploadError && <p className="mt-4 text-xs text-[#FF5B5B]">{uploadError}</p>}
 
           {savedFlash && (
             <motion.p
@@ -200,47 +326,6 @@ export default function Profile() {
             </motion.p>
           )}
         </div>
-      </div>
-
-      {/* ================= STAT STRIP ================= */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {[
-          {
-            label: 'Workouts',
-            value: stats?.totalWorkouts ?? '—',
-            icon: Dumbbell,
-            color: '#7CFF5B',
-          },
-          {
-            label: 'Day Streak',
-            value: stats?.currentStreak ?? '—',
-            icon: Flame,
-            color: '#FF5B8A',
-          },
-          {
-            label: 'Volume Lifted',
-            value: stats ? `${(stats.totalVolumeKg / 1000).toFixed(0)}t` : '—',
-            icon: TrendingUp,
-            color: '#5BE7FF',
-          },
-          {
-            label: 'Hours Trained',
-            value: stats?.hoursTrained ?? '—',
-            icon: Clock,
-            color: '#B75BFF',
-          },
-        ].map(({ label, value, icon: Icon, color }) => (
-          <div key={label} className="p-5 rounded-2xl bg-[#101010] border border-white/[0.06]">
-            <div
-              className="w-9 h-9 rounded-xl grid place-items-center mb-3"
-              style={{ backgroundColor: `${color}18` }}
-            >
-              <Icon className="w-4 h-4" style={{ color }} />
-            </div>
-            <p className="text-2xl font-bold">{value}</p>
-            <p className="text-xs text-white/40 mt-0.5">{label}</p>
-          </div>
-        ))}
       </div>
 
       {/* ================= TABS ================= */}
@@ -258,239 +343,86 @@ export default function Profile() {
         ))}
       </div>
 
-      {/* ================= TAB CONTENT ================= */}
-      {tab === 'Overview' && (
-        <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-6">
-          <div className="space-y-6">
-            {/* Weekly volume */}
-            <section className="p-6 rounded-3xl bg-[#101010] border border-white/[0.06]">
-              <div className="flex items-end justify-between mb-6">
-                <div>
-                  <h2 className="text-lg font-bold">This Week</h2>
-                  <p className="text-sm text-white/40 mt-0.5">Training volume by day</p>
-                </div>
-                {stats && (
-                  <span className="px-3 py-1.5 rounded-lg bg-[#7CFF5B]/12 text-[#7CFF5B] text-xs font-bold">
-                    {stats.thisWeek.done}/{stats.thisWeek.target} sessions
-                  </span>
-                )}
-              </div>
-
-              {stats ? (
-                <div className="flex items-end gap-2 sm:gap-3 h-40">
-                  {stats.weeklyVolume.map((d) => {
-                    const max = Math.max(...stats.weeklyVolume.map((x) => x.volume), 1);
-                    const pct = (d.volume / max) * 100;
-                    return (
-                      <div key={d.day} className="flex-1 h-full flex flex-col items-center justify-end gap-2">
-                        <span className="text-[10px] text-white/35 font-medium">
-                          {d.volume ? `${(d.volume / 1000).toFixed(1)}t` : '—'}
-                        </span>
-                        <div className="w-full flex-1 flex items-end">
-                          <motion.div
-                            initial={{ height: 0 }}
-                            animate={{ height: `${Math.max(pct, 3)}%` }}
-                            transition={{ duration: 0.6, ease: 'easeOut' }}
-                            className="w-full rounded-t-lg"
-                            style={{
-                              background: d.volume
-                                ? 'linear-gradient(180deg, #7CFF5B, #7CFF5B60)'
-                                : 'rgba(255,255,255,0.05)',
-                            }}
-                          />
-                        </div>
-                        <span className="text-xs text-white/45">{d.day}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="h-40 grid place-items-center text-white/25">
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                </div>
-              )}
-            </section>
-
-            {/* Personal bests */}
-            <section className="p-6 rounded-3xl bg-[#101010] border border-white/[0.06]">
-              <h2 className="text-lg font-bold mb-5">Personal Bests</h2>
-              <div className="space-y-2.5">
-                {(stats?.personalBests ?? []).map((pb) => (
-                  <div
-                    key={pb.lift}
-                    className="flex items-center justify-between p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06]"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-[#7CFF5B]/12 grid place-items-center">
-                        <Dumbbell className="w-4 h-4 text-[#7CFF5B]" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-sm">{pb.lift}</p>
-                        <p className="text-xs text-white/35">
-                          {new Date(pb.date).toLocaleDateString(undefined, {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric',
-                          })}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-bold text-[#7CFF5B]">{pb.weightKg} kg</p>
-                      <p className="text-xs text-white/35">× {pb.reps}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            {/* Activity */}
-            <section className="p-6 rounded-3xl bg-[#101010] border border-white/[0.06]">
-              <h2 className="text-lg font-bold mb-5">Recent Activity</h2>
-              <div className="space-y-4">
-                {(stats?.recentActivity ?? []).map((a, i, arr) => (
-                  <div key={a.id} className="flex gap-4">
-                    <div className="flex flex-col items-center">
-                      <span className="w-2 h-2 rounded-full bg-[#7CFF5B] mt-1.5" />
-                      {i < arr.length - 1 && <span className="flex-1 w-px bg-white/[0.08] my-1" />}
-                    </div>
-                    <div className="pb-1">
-                      <p className="text-sm font-medium">{a.text}</p>
-                      <p className="text-xs text-white/35 mt-0.5">
-                        {a.detail} · {a.when}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-
-          {/* Right column */}
-          <div className="space-y-6">
-            <section className="p-6 rounded-3xl bg-[#101010] border border-white/[0.06]">
-              <h2 className="text-lg font-bold mb-1">Body Focus</h2>
-              <p className="text-sm text-white/40 mb-4">Muscles trained this week</p>
-              <div className="h-64">
-                <BodyMap
-                  view="front"
-                  selected="chest"
-                  active="quads"
-                  showLabels={false}
-                  onHover={() => {}}
-                  onSelect={() => {}}
-                />
-              </div>
-            </section>
-
-            <section className="p-6 rounded-3xl bg-[#101010] border border-white/[0.06]">
-              <h2 className="text-lg font-bold mb-5">Achievements</h2>
-              <div className="grid grid-cols-3 gap-2.5">
-                {(stats?.achievements ?? []).map((a) => {
-                  const Icon = ACHIEVEMENT_ICONS[a.icon] ?? Trophy;
-                  return (
-                    <div
-                      key={a.id}
-                      title={a.label}
-                      className={`aspect-square rounded-2xl grid place-items-center p-2 border transition ${
-                        a.earned
-                          ? 'bg-[#7CFF5B]/10 border-[#7CFF5B]/25'
-                          : 'bg-white/[0.02] border-white/[0.06] opacity-40'
-                      }`}
-                    >
-                      <Icon
-                        className="w-5 h-5"
-                        style={{ color: a.earned ? '#7CFF5B' : '#8A8A8A' }}
-                      />
-                      <span className="mt-1.5 text-[9px] text-center leading-tight text-white/50">
-                        {a.label}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          </div>
-        </div>
-      )}
-
+      {/* ================= PERSONAL INFO ================= */}
       {tab === 'Personal Info' && (
         <div className="p-6 sm:p-8 rounded-3xl bg-[#101010] border border-white/[0.06]">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-lg font-bold">Personal Information</h2>
               <p className="text-sm text-white/40 mt-0.5">
-                {editing ? 'Make your changes and hit save.' : 'Click Edit Profile to change these.'}
+                {editing ? 'Make your changes and hit Save.' : 'Click Edit Profile to change these.'}
               </p>
             </div>
           </div>
 
+          {profileError && <Banner>{profileError}</Banner>}
+
           <div className="grid sm:grid-cols-2 gap-5">
-            <Field label="First name">
+            <Field label="First name" error={fieldErrors.first_name}>
               <input
-                value={draft.firstName ?? ''}
+                value={editing ? draft.firstName ?? '' : uf.firstName(user)}
                 onChange={set('firstName')}
                 disabled={!editing}
                 className={inputCls}
               />
             </Field>
-            <Field label="Last name">
+            <Field label="Last name" error={fieldErrors.last_name}>
               <input
-                value={draft.lastName ?? ''}
+                value={editing ? draft.lastName ?? '' : uf.lastName(user)}
                 onChange={set('lastName')}
                 disabled={!editing}
                 className={inputCls}
               />
             </Field>
-            <Field label="Username">
+            <Field label="Username" error={fieldErrors.username}>
               <input
-                value={draft.username ?? ''}
+                value={editing ? draft.username ?? '' : uf.username(user)}
                 onChange={set('username')}
                 disabled={!editing}
                 className={inputCls}
               />
             </Field>
-            <Field label="Email address">
+            <Field label="Email address" error={fieldErrors.email}>
               <input
                 type="email"
-                value={draft.email ?? ''}
+                value={editing ? draft.email ?? '' : uf.email(user)}
                 onChange={set('email')}
                 disabled={!editing}
                 className={inputCls}
               />
             </Field>
-            <Field label="Date of birth">
+            <Field label="Date of birth" error={fieldErrors.date_of_birth}>
               <input
                 type="date"
-                value={draft.dateOfBirth ?? ''}
+                value={editing ? draft.dateOfBirth ?? '' : uf.dateOfBirth(user)}
                 onChange={set('dateOfBirth')}
                 disabled={!editing}
                 className={`${inputCls} [color-scheme:dark]`}
               />
             </Field>
-            <Field label="Location">
+            <Field label="Location" error={fieldErrors.location}>
               <input
-                value={draft.location ?? ''}
+                value={editing ? draft.location ?? '' : uf.location(user)}
                 onChange={set('location')}
                 disabled={!editing}
                 className={inputCls}
               />
             </Field>
-            <Field label="Height (cm)">
+            <Field label="Height (cm)" error={fieldErrors.height}>
               <input
                 type="number"
-                value={draft.heightCm ?? ''}
-                onChange={(e) => setDraft({ ...draft, heightCm: Number(e.target.value) })}
+                value={editing ? draft.height ?? '' : (uf.height(user) ?? '')}
+                onChange={set('height')}
                 disabled={!editing}
                 className={inputCls}
               />
             </Field>
-            <Field label="Weight (kg)">
+            <Field label="Weight (kg)" error={fieldErrors.weight}>
               <input
                 type="number"
                 step="0.1"
-                value={draft.weightKg ?? ''}
-                onChange={(e) => setDraft({ ...draft, weightKg: Number(e.target.value) })}
+                value={editing ? draft.weight ?? '' : (uf.weight(user) ?? '')}
+                onChange={set('weight')}
                 disabled={!editing}
                 className={inputCls}
               />
@@ -498,214 +430,129 @@ export default function Profile() {
           </div>
 
           <div className="mt-5">
-            <Field label="Bio">
+            <Field label="Bio" error={fieldErrors.bio}>
               <textarea
                 rows={3}
-                value={draft.bio ?? ''}
+                value={editing ? draft.bio ?? '' : uf.bio(user)}
                 onChange={set('bio')}
                 disabled={!editing}
                 className={`${inputCls} h-auto py-3 resize-none`}
               />
             </Field>
           </div>
-
-          <div className="grid sm:grid-cols-3 gap-3 mt-7 pt-7 border-t border-white/[0.06]">
-            <div className="p-4 rounded-2xl bg-white/[0.03]">
-              <p className="text-xs text-white/40">BMI</p>
-              <p className="text-2xl font-bold mt-1">{bmi}</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white/[0.03]">
-              <p className="text-xs text-white/40">Goal weight</p>
-              <p className="text-2xl font-bold mt-1">{draft.goalWeightKg} kg</p>
-            </div>
-            <div className="p-4 rounded-2xl bg-white/[0.03]">
-              <p className="text-xs text-white/40 mb-2">Progress to goal</p>
-              <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#7CFF5B] to-[#5BE7FF]"
-                  style={{ width: `${weightProgress}%` }}
-                />
-              </div>
-              <p className="text-xs text-white/40 mt-2">{weightProgress}%</p>
-            </div>
-          </div>
         </div>
       )}
 
-      {tab === 'Training' && (
-        <div className="p-6 sm:p-8 rounded-3xl bg-[#101010] border border-white/[0.06]">
-          <h2 className="text-lg font-bold mb-6">Training Preferences</h2>
-
-          <div className="space-y-7">
-            <div>
-              <p className="text-sm text-white/50 mb-3">Primary goal</p>
-              <div className="grid sm:grid-cols-4 gap-2">
-                {Object.entries(GOAL_LABELS).map(([value, label]) => (
-                  <button
-                    key={value}
-                    disabled={!editing}
-                    onClick={() => setDraft({ ...draft, primaryGoal: value })}
-                    className={`px-4 py-3 rounded-xl text-sm font-medium border transition disabled:cursor-not-allowed ${
-                      draft.primaryGoal === value
-                        ? 'bg-[#7CFF5B]/12 border-[#7CFF5B] text-[#7CFF5B]'
-                        : 'bg-[#151515] border-white/10 text-white/60 enabled:hover:border-white/25'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
+      {/* ================= SECURITY ================= */}
+      {tab === 'Security' && (
+        <form
+          onSubmit={submitPassword}
+          className="p-6 sm:p-8 rounded-3xl bg-[#101010] border border-white/[0.06]"
+        >
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-[#5BE7FF]/12 grid place-items-center">
+              <KeyRound className="w-4 h-4 text-[#5BE7FF]" />
             </div>
-
             <div>
-              <p className="text-sm text-white/50 mb-3">Experience level</p>
-              <div className="grid sm:grid-cols-3 gap-2">
-                {['beginner', 'intermediate', 'advanced'].map((lvl) => (
-                  <button
-                    key={lvl}
-                    disabled={!editing}
-                    onClick={() => setDraft({ ...draft, experience: lvl })}
-                    className={`px-4 py-3 rounded-xl text-sm font-medium capitalize border transition disabled:cursor-not-allowed ${
-                      draft.experience === lvl
-                        ? 'bg-[#7CFF5B]/12 border-[#7CFF5B] text-[#7CFF5B]'
-                        : 'bg-[#151515] border-white/10 text-white/60 enabled:hover:border-white/25'
-                    }`}
-                  >
-                    {lvl}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm text-white/50">Weekly session target</p>
-                <span className="text-sm font-bold text-[#7CFF5B]">
-                  {draft.weeklyTarget} / week
-                </span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="7"
-                value={draft.weeklyTarget ?? 3}
-                disabled={!editing}
-                onChange={(e) => setDraft({ ...draft, weeklyTarget: Number(e.target.value) })}
-                className="w-full accent-[#7CFF5B] disabled:opacity-50"
-              />
-              <div className="flex justify-between mt-1 text-[11px] text-white/25">
-                {[1, 2, 3, 4, 5, 6, 7].map((n) => (
-                  <span key={n}>{n}</span>
-                ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="text-sm text-white/50 mb-3">Available equipment</p>
-              <div className="flex flex-wrap gap-2">
-                {['Barbell', 'Dumbbell', 'Cable', 'Machine', 'Kettlebell', 'Bands', 'Bodyweight'].map(
-                  (eq) => {
-                    const on = (draft.equipment ?? []).includes(eq);
-                    return (
-                      <button
-                        key={eq}
-                        disabled={!editing}
-                        onClick={() =>
-                          setDraft({
-                            ...draft,
-                            equipment: on
-                              ? draft.equipment.filter((x) => x !== eq)
-                              : [...(draft.equipment ?? []), eq],
-                          })
-                        }
-                        className={`px-4 py-2 rounded-full text-sm font-medium border transition disabled:cursor-not-allowed ${
-                          on
-                            ? 'bg-[#7CFF5B]/12 border-[#7CFF5B] text-[#7CFF5B]'
-                            : 'bg-transparent border-white/10 text-white/50 enabled:hover:border-white/25'
-                        }`}
-                      >
-                        {eq}
-                      </button>
-                    );
-                  }
-                )}
-              </div>
-            </div>
-
-            <div>
-              <p className="text-sm text-white/50 mb-3">Units</p>
-              <div className="inline-flex p-1 rounded-xl bg-[#151515] border border-white/10">
-                {['metric', 'imperial'].map((u) => (
-                  <button
-                    key={u}
-                    disabled={!editing}
-                    onClick={() => setDraft({ ...draft, units: u })}
-                    className={`px-5 py-2 text-sm font-semibold rounded-lg capitalize transition disabled:cursor-not-allowed ${
-                      draft.units === u ? 'bg-[#7CFF5B] text-[#070707]' : 'text-white/55'
-                    }`}
-                  >
-                    {u}
-                  </button>
-                ))}
-              </div>
+              <h2 className="text-lg font-bold">Change Password</h2>
+              <p className="text-sm text-white/40 mt-0.5">
+                You will stay signed in on this device.
+              </p>
             </div>
           </div>
-        </div>
-      )}
 
-      {tab === 'Account' && (
-        <div className="space-y-6">
-          <section className="p-6 sm:p-8 rounded-3xl bg-[#101010] border border-white/[0.06]">
-            <h2 className="text-lg font-bold mb-6">Security</h2>
-            <div className="grid sm:grid-cols-2 gap-5">
+          {pwState.error && <Banner>{pwState.error}</Banner>}
+          {pwState.done && <Banner kind="success">Password changed.</Banner>}
+
+          <div className="grid sm:grid-cols-2 gap-5 max-w-2xl">
+            <div className="sm:col-span-2">
               <Field label="Current password">
-                <input type="password" placeholder="••••••••" className={inputCls} />
-              </Field>
-              <Field label="New password">
-                <input type="password" placeholder="••••••••" className={inputCls} />
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={pw.current}
+                  onChange={(e) => setPw({ ...pw, current: e.target.value })}
+                  placeholder="••••••••"
+                  required
+                  className={inputCls}
+                />
               </Field>
             </div>
-            {/* TODO(django): POST /api/auth/change-password/ */}
-            <button className="mt-5 px-5 py-3 rounded-xl bg-white/[0.06] border border-white/10 text-sm font-semibold hover:bg-white/[0.10] transition">
-              Update password
-            </button>
-          </section>
+            <Field label="New password">
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={pw.next}
+                onChange={(e) => setPw({ ...pw, next: e.target.value })}
+                placeholder="At least 8 characters"
+                required
+                className={inputCls}
+              />
+            </Field>
+            <Field label="Confirm new password">
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={pw.confirm}
+                onChange={(e) => setPw({ ...pw, confirm: e.target.value })}
+                placeholder="Re-enter it"
+                required
+                className={inputCls}
+              />
+            </Field>
+          </div>
 
-          <section className="p-6 sm:p-8 rounded-3xl bg-[#101010] border border-white/[0.06]">
-            <h2 className="text-lg font-bold mb-6">Notifications</h2>
-            <div className="space-y-4">
-              {[
-                ['Workout reminders', 'A nudge 30 minutes before a scheduled session.'],
-                ['Streak alerts', 'Tell me when my streak is about to break.'],
-                ['Weekly summary', 'A recap of volume and PRs every Sunday.'],
-              ].map(([title, desc], i) => (
-                <label
-                  key={title}
-                  className="flex items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.03] cursor-pointer"
-                >
-                  <div>
-                    <p className="text-sm font-medium">{title}</p>
-                    <p className="text-xs text-white/35 mt-0.5">{desc}</p>
-                  </div>
-                  <input type="checkbox" defaultChecked={i !== 2} className="sr-only peer" />
-                  <span className="relative w-11 h-6 shrink-0 rounded-full bg-white/10 peer-checked:bg-[#7CFF5B] transition-colors after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-5" />
-                </label>
-              ))}
+          <button
+            type="submit"
+            disabled={pwState.saving}
+            className="mt-6 flex items-center gap-2 px-5 py-3 rounded-xl bg-[#7CFF5B] text-[#070707] text-sm font-bold hover:bg-[#91ff75] transition disabled:opacity-60"
+          >
+            {pwState.saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            {pwState.saving ? 'Updating…' : 'Update password'}
+          </button>
+        </form>
+      )}
+
+      {/* ================= ACCOUNT ================= */}
+      {tab === 'Account' && (
+        <section className="p-6 sm:p-8 rounded-3xl bg-[#FF5B5B]/[0.04] border border-[#FF5B5B]/20">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-10 h-10 rounded-xl bg-[#FF5B5B]/12 grid place-items-center">
+              <Trash2 className="w-4 h-4 text-[#FF5B5B]" />
             </div>
-          </section>
+            <h2 className="text-lg font-bold text-[#FF8A8A]">Delete Account</h2>
+          </div>
 
-          <section className="p-6 sm:p-8 rounded-3xl bg-[#FF5B5B]/[0.04] border border-[#FF5B5B]/20">
-            <h2 className="text-lg font-bold text-[#FF8A8A] mb-2">Danger Zone</h2>
-            <p className="text-sm text-white/45 mb-5">
-              Deleting your account removes every workout, plan and personal record. This cannot be
-              undone.
-            </p>
-            {/* TODO(django): DELETE /api/profile/ */}
-            <button className="px-5 py-3 rounded-xl border border-[#FF5B5B]/40 text-[#FF8A8A] text-sm font-semibold hover:bg-[#FF5B5B]/10 transition">
-              Delete account
+          <p className="text-sm text-white/50 max-w-xl leading-relaxed">
+            This permanently removes your account, your schedule and every exercise you have
+            created. It cannot be undone.
+          </p>
+
+          {deleteError && (
+            <div className="mt-5 max-w-md">
+              <Banner>{deleteError}</Banner>
+            </div>
+          )}
+
+          <div className="mt-6 max-w-md">
+            <Field label={`Type DELETE to confirm`}>
+              <input
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                placeholder="DELETE"
+                className={inputCls}
+              />
+            </Field>
+            <button
+              onClick={confirmDelete}
+              disabled={confirmText !== 'DELETE' || deleting}
+              className="mt-4 flex items-center gap-2 px-5 py-3 rounded-xl bg-[#FF5B5B] text-white text-sm font-bold hover:bg-[#ff7070] transition disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
+              {deleting ? 'Deleting…' : 'Delete my account'}
             </button>
-          </section>
-        </div>
+          </div>
+        </section>
       )}
     </div>
   );
