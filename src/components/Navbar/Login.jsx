@@ -10,7 +10,7 @@ export default function Login() {
 
   // Django's default auth is username-based; this field accepts either and is
   // sent under both keys so it works whichever your serializer expects.
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -20,7 +20,7 @@ export default function Login() {
     setError("");
     setSubmitting(true);
     try {
-      await signIn({ username: email, email, password });
+      await signIn({ username, password });
       navigate(location.state?.from ?? "/app/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Could not sign you in. Check your details and try again.");
@@ -224,10 +224,11 @@ export default function Login() {
               </label>
 
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
+                  type="text"
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="username"
                 required
                 className="
                   w-full

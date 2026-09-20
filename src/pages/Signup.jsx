@@ -76,15 +76,15 @@ export default function Signup() {
     setSubmitting(true);
     try {
       const me = await signUp({
-        username: form.email.split('@')[0],
+        username: form.firstName + form.lastName,
         first_name: form.firstName,
         last_name: form.lastName,
         email: form.email,
         password: form.password,
         password2: form.password,
         confirm_password: form.password,
-        goal: form.goal,
-        experience: form.experience,
+        // goal: form.goal,
+        // experience: form.experience,
       });
 
       // If /api/register/ does not return a token, send them to log in.
@@ -132,7 +132,7 @@ export default function Signup() {
               <span className="text-[#7CFF5B]">transformation.</span>
             </h1>
             <p className="mt-6 text-lg text-white/50">
-              Join 50,000+ lifters tracking every set, every rep, every gain.
+              Join and track every set, every rep, every gain.
             </p>
 
             <div className="mt-10 space-y-4">
@@ -151,7 +151,7 @@ export default function Signup() {
               ))}
             </div>
 
-            <div className="mt-12 flex items-center gap-6 p-5 rounded-2xl bg-[#121212] border border-white/[0.08]">
+            {/* <div className="mt-12 flex items-center gap-6 p-5 rounded-2xl bg-[#121212] border border-white/[0.08]">
               <div>
                 <p className="text-3xl font-bold text-[#7CFF5B]">50K+</p>
                 <p className="text-sm text-white/40">Active members</p>
@@ -166,7 +166,7 @@ export default function Signup() {
                 <p className="text-3xl font-bold text-[#FF5B8A]">4.9</p>
                 <p className="text-sm text-white/40">Average rating</p>
               </div>
-            </div>
+            </div> */}
           </div>
         </div>
       </div>
@@ -203,7 +203,7 @@ export default function Signup() {
                 <input
                   value={form.firstName}
                   onChange={set('firstName')}
-                  placeholder="Daniel"
+                  placeholder="..."
                   className={`${inputClass} h-13 py-3.5 ${errors.firstName ? 'border-[#FF5B5B]' : ''}`}
                 />
                 {errors.firstName && (
@@ -215,7 +215,7 @@ export default function Signup() {
                 <input
                   value={form.lastName}
                   onChange={set('lastName')}
-                  placeholder="Dao"
+                  placeholder="..."
                   className={`${inputClass} py-3.5`}
                 />
               </div>
@@ -290,7 +290,7 @@ export default function Signup() {
             </div>
 
             {/* Goal */}
-            <div>
+            {/* <div>
               <label className="block text-sm text-white/60 mb-2.5">What is your main goal?</label>
               <div className="grid grid-cols-2 gap-2">
                 {GOALS.map((g) => (
@@ -308,9 +308,10 @@ export default function Signup() {
                   </button>
                 ))}
               </div>
-            </div>
+            </div> */}
 
             {/* Experience */}
+            {/*
             <div>
               <label className="block text-sm text-white/60 mb-2.5">Training experience</label>
               <div className="grid grid-cols-3 gap-2">
@@ -336,7 +337,7 @@ export default function Signup() {
                   </button>
                 ))}
               </div>
-            </div>
+            </div> */}
 
             {/* Terms */}
             <div>

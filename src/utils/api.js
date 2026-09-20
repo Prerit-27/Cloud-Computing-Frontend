@@ -179,6 +179,7 @@ function extractToken(payload) {
 export async function register(payload) {
   const data = await request('/register/', { method: 'POST', body: payload, authed: false });
   const token = extractToken(data);
+  console.log('register token:', token);
   if (token) auth.setToken(token);
   return data;
 }
