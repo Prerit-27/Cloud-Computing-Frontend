@@ -38,6 +38,7 @@ export default function Signup() {
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
+    username: '',
     email: '',
     password: '',
     confirm: '',
@@ -59,6 +60,9 @@ export default function Signup() {
   const validate = () => {
     const next = {};
     if (!form.firstName.trim()) next.firstName = 'Required';
+    if (!form.username.trim()) next.username = 'Required';
+    else if (!/^[\w.@+-]+$/.test(form.username.trim()))
+      next.username = 'Letters, digits and @ . + - _ only (no spaces)';
     if (!form.email.trim()) next.email = 'Required';
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) next.email = 'Enter a valid email';
     if (form.password.length < 8) next.password = 'At least 8 characters';
@@ -75,17 +79,15 @@ export default function Signup() {
 
     setSubmitting(true);
     try {
-      const me = await signUp({
-        username: form.firstName + form.lastName,
-        first_name: form.firstName,
-        last_name: form.lastName,
-        email: form.email,
-        password: form.password,
-        password2: form.password,
-        confirm_password: form.password,
-        // goal: form.goal,
-        // experience: form.experience,
-      });
+      const me = await signUp(
+        {
+          username: form.username.trim(),
+          email: form.email.trim(),
+          password: form.password,
+          confirm_password: form.confirm,
+        },
+        { first_name: form.firstName.trim(), last_name: form.lastName.trim() }
+      );
 
       // If /api/register/ does not return a token, send them to log in.
       navigate(me ? '/app/dashboard' : '/login', { replace: true });
@@ -94,10 +96,10 @@ export default function Signup() {
       // Map DRF field errors onto the matching inputs.
       const f = err.fields ?? {};
       setErrors({
+        username: f.username,
         email: f.email,
         password: f.password,
-        firstName: f.first_name,
-        confirm: f.password2 ?? f.confirm_password,
+        confirm: f.confirm_password,
       });
     } finally {
       setSubmitting(false);
@@ -219,6 +221,21 @@ export default function Signup() {
                   className={`${inputClass} py-3.5`}
                 />
               </div>
+            </div>
+
+            {/* Username */}
+            <div>
+              <label className="block text-sm text-white/60 mb-2">Username</label>
+              <input
+                value={form.username}
+                onChange={set('username')}
+                autoComplete="username"
+                placeholder="Used to log in"
+                className={`${inputClass} py-3.5 ${errors.username ? 'border-[#FF5B5B]' : ''}`}
+              />
+              {errors.username && (
+                <p className="mt-1.5 text-xs text-[#FF5B5B]">{errors.username}</p>
+              )}
             </div>
 
             {/* Email */}

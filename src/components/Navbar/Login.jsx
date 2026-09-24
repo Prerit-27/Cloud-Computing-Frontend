@@ -8,8 +8,7 @@ export default function Login() {
   const location = useLocation();
   const { signIn } = useAuth();
 
-  // Django's default auth is username-based; this field accepts either and is
-  // sent under both keys so it works whichever your serializer expects.
+  // LoginSerializer authenticates by username + password.
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -207,6 +206,12 @@ export default function Login() {
           </div>
 
 
+          {location.state?.notice && !error && (
+            <div className="mb-5 p-4 rounded-xl bg-[#7CFF5B]/10 border border-[#7CFF5B]/25">
+              <p className="text-sm text-[#7CFF5B]">{location.state.notice}</p>
+            </div>
+          )}
+
           {error && (
             <div className="mb-5 flex gap-3 p-4 rounded-xl bg-[#FF5B5B]/10 border border-[#FF5B5B]/25">
               <AlertCircle className="w-4 h-4 text-[#FF5B5B] shrink-0 mt-0.5" />
@@ -217,10 +222,10 @@ export default function Login() {
           {/* Login form */}
           <form onSubmit={handleLogin} className="space-y-4">
 
-            {/* Email */}
+            {/* Username */}
             <div>
               <label className="block text-sm text-white/60 mb-2">
-                Email address
+                Username
               </label>
 
               <input

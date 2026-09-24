@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
   Camera,
-  MapPin,
+  Phone,
   CalendarDays,
   Pencil,
   Check,
@@ -63,7 +63,7 @@ function Banner({ kind = 'error', children }) {
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { user, patchUser, setUser, deleteAccount } = useAuth();
+  const { user, patchUser, setUser, clearSession, deleteAccount } = useAuth();
   const fileRef = useRef(null);
 
   const [tab, setTab] = useState('Personal Info');
@@ -101,13 +101,9 @@ export default function Profile() {
     setDraft({
       firstName: uf.firstName(user),
       lastName: uf.lastName(user),
-      username: uf.username(user),
       email: uf.email(user),
       bio: uf.bio(user),
-      location: uf.location(user),
-      dateOfBirth: uf.dateOfBirth(user),
-      height: uf.height(user) ?? '',
-      weight: uf.weight(user) ?? '',
+      phone: uf.phone(user),
     });
     setProfileError('');
     setFieldErrors({});
@@ -150,13 +146,12 @@ export default function Profile() {
     setUploading(true);
     setUploadError('');
     try {
-      const updated = await api.uploadProfilePicture(file);
-      // The endpoint may return the whole user or just the image path.
-      if (updated && typeof updated === 'object' && (updated.id || updated.username)) {
-        setUser(updated);
-      } else {
-        setUser(await api.getProfile());
-      }
+      const { profile_picture_url } = await api.uploadProfilePicture(file);
+      // Supabase keeps the same public URL on re-upload; bust the browser cache.
+      setUser((prev) => ({
+        ...prev,
+        profile_picture_url: `${profile_picture_url.split('?')[0]}?v=${Date.now()}`,
+      }));
     } catch (err) {
       setUploadError(err.message);
     } finally {
@@ -170,19 +165,26 @@ export default function Profile() {
       setPwState({ saving: false, error: 'New passwords do not match.', done: false });
       return;
     }
-    if (pw.next.length < 8) {
-      setPwState({ saving: false, error: 'New password must be at least 8 characters.', done: false });
+    if (pw.next.length < 6) {
+      setPwState({ saving: false, error: 'New password must be at least 6 characters.', done: false });
       return;
     }
 
     setPwState({ saving: true, error: '', done: false });
     try {
       await api.changePassword(toApiPasswordChange(pw));
-      setPw({ current: '', next: '', confirm: '' });
-      setPwState({ saving: false, error: '', done: true });
-      setTimeout(() => setPwState((s) => ({ ...s, done: false })), 3000);
+      // The backend deletes the token on a password change, so log in again.
+      clearSession();
+      navigate('/login', {
+        replace: true,
+        state: { notice: 'Password changed. Please log in with your new password.' },
+      });
     } catch (err) {
-      setPwState({ saving: false, error: err.message, done: false });
+      setPwState({
+        saving: false,
+        error: err.fields?.old_password ?? err.fields?.new_password ?? err.message,
+        done: false,
+      });
     }
   };
 
@@ -252,10 +254,10 @@ export default function Profile() {
                 <p className="text-white/40 text-sm mt-0.5">@{uf.username(user)}</p>
               )}
               <div className="flex flex-wrap gap-4 mt-3 text-sm text-white/45">
-                {uf.location(user) && (
+                {uf.phone(user) && (
                   <span className="flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5" />
-                    {uf.location(user)}
+                    <Phone className="w-3.5 h-3.5" />
+                    {uf.phone(user)}
                   </span>
                 )}
                 {joined && (
@@ -374,13 +376,8 @@ export default function Profile() {
                 className={inputCls}
               />
             </Field>
-            <Field label="Username" error={fieldErrors.username}>
-              <input
-                value={editing ? draft.username ?? '' : uf.username(user)}
-                onChange={set('username')}
-                disabled={!editing}
-                className={inputCls}
-              />
+            <Field label="Username (cannot be changed)">
+              <input value={uf.username(user)} disabled className={inputCls} />
             </Field>
             <Field label="Email address" error={fieldErrors.email}>
               <input
@@ -391,38 +388,12 @@ export default function Profile() {
                 className={inputCls}
               />
             </Field>
-            <Field label="Date of birth" error={fieldErrors.date_of_birth}>
+            <Field label="Phone number" error={fieldErrors.phone_number}>
               <input
-                type="date"
-                value={editing ? draft.dateOfBirth ?? '' : uf.dateOfBirth(user)}
-                onChange={set('dateOfBirth')}
-                disabled={!editing}
-                className={`${inputCls} [color-scheme:dark]`}
-              />
-            </Field>
-            <Field label="Location" error={fieldErrors.location}>
-              <input
-                value={editing ? draft.location ?? '' : uf.location(user)}
-                onChange={set('location')}
-                disabled={!editing}
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Height (cm)" error={fieldErrors.height}>
-              <input
-                type="number"
-                value={editing ? draft.height ?? '' : (uf.height(user) ?? '')}
-                onChange={set('height')}
-                disabled={!editing}
-                className={inputCls}
-              />
-            </Field>
-            <Field label="Weight (kg)" error={fieldErrors.weight}>
-              <input
-                type="number"
-                step="0.1"
-                value={editing ? draft.weight ?? '' : (uf.weight(user) ?? '')}
-                onChange={set('weight')}
+                type="tel"
+                maxLength={20}
+                value={editing ? draft.phone ?? '' : uf.phone(user)}
+                onChange={set('phone')}
                 disabled={!editing}
                 className={inputCls}
               />
@@ -456,13 +427,12 @@ export default function Profile() {
             <div>
               <h2 className="text-lg font-bold">Change Password</h2>
               <p className="text-sm text-white/40 mt-0.5">
-                You will stay signed in on this device.
+                You will be signed out and asked to log in again.
               </p>
             </div>
           </div>
 
           {pwState.error && <Banner>{pwState.error}</Banner>}
-          {pwState.done && <Banner kind="success">Password changed.</Banner>}
 
           <div className="grid sm:grid-cols-2 gap-5 max-w-2xl">
             <div className="sm:col-span-2">
@@ -484,7 +454,7 @@ export default function Profile() {
                 autoComplete="new-password"
                 value={pw.next}
                 onChange={(e) => setPw({ ...pw, next: e.target.value })}
-                placeholder="At least 8 characters"
+                placeholder="At least 6 characters"
                 required
                 className={inputCls}
               />
@@ -524,8 +494,8 @@ export default function Profile() {
           </div>
 
           <p className="text-sm text-white/50 max-w-xl leading-relaxed">
-            This permanently removes your account, your schedule and every exercise you have
-            created. It cannot be undone.
+            This permanently removes your account, profile and weekly schedule. Exercises you
+            added stay in the shared library. It cannot be undone.
           </p>
 
           {deleteError && (

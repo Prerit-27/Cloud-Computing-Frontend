@@ -4,7 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Plus,
-  Clock,
+  Pencil,
   Check,
   Trash2,
   X,
@@ -14,22 +14,26 @@ import {
   AlertCircle,
   RefreshCw,
   Dumbbell,
+  Search,
+  Activity,
 } from 'lucide-react';
 import * as api from '../utils/api';
 import {
   normalizeScheduleEntry,
   toApiScheduleEntry,
-  toApiScheduleUpdate,
-  expandToRange,
   toISODate,
+  dayCodeOf,
+  dayLabel,
+  DAYS,
   exerciseFields as ex,
+  muscleColor,
+  humanize,
 } from '../utils/adapters';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
-const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /** Monday-first 6x7 grid covering the given month. */
 function buildGrid(year, month) {
@@ -44,16 +48,6 @@ function buildGrid(year, month) {
   });
 }
 
-const EMPTY_FORM = {
-  title: '',
-  time: '18:00',
-  duration: 60,
-  exerciseId: '',
-  sets: '',
-  reps: '',
-  notes: '',
-};
-
 const inputCls =
   'w-full h-12 px-4 rounded-xl bg-[#151515] border border-white/10 text-white outline-none transition focus:border-[#7CFF5B] focus:ring-1 focus:ring-[#7CFF5B] placeholder:text-white/25';
 
@@ -67,9 +61,11 @@ export default function Calendar() {
 
   const [selectedIso, setSelectedIso] = useState(toISODate(today));
   const [modalOpen, setModalOpen] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [form, setForm] = useState({ day: 'mon', exerciseIds: [], notes: '' });
+  const [pickerQuery, setPickerQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
@@ -79,8 +75,9 @@ export default function Calendar() {
   // effect without triggering a cascading render.
   const fetchEntries = useCallback(async () => {
     try {
-      const raw = await api.listSchedule();
+      const [raw, lib] = await Promise.all([api.listSchedule(), api.listExercises()]);
       setEntries(raw.map(normalizeScheduleEntry));
+      setExercises(lib);
       setError('');
     } catch (err) {
       setError(err.message);
@@ -99,8 +96,6 @@ export default function Calendar() {
     // cascading render — the rule cannot see past the await boundary.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchEntries();
-    // The exercise list only populates the picker — a failure here is not fatal.
-    api.listExercises().then(setExercises).catch(() => {});
   }, [fetchEntries]);
 
   useEffect(() => {
@@ -112,36 +107,21 @@ export default function Calendar() {
 
   const grid = useMemo(() => buildGrid(year, month), [year, month]);
 
-  /** Weekday-only entries are projected onto every matching day on screen. */
-  const visible = useMemo(() => {
-    if (!grid.length) return [];
-    return expandToRange(entries, grid[0].iso, grid[grid.length - 1].iso);
-  }, [entries, grid]);
+  /** One plan per weekday; every calendar day shows its weekday's plan. */
+  const byDay = useMemo(() => new Map(entries.map((e) => [e.day, e])), [entries]);
 
-  const byDate = useMemo(() => {
-    const map = new Map();
-    for (const e of visible) {
-      if (!map.has(e.date)) map.set(e.date, []);
-      map.get(e.date).push(e);
-    }
-    for (const list of map.values()) {
-      list.sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    }
-    return map;
-  }, [visible]);
+  const selectedDate = new Date(`${selectedIso}T00:00:00`);
+  const selectedDay = dayCodeOf(selectedDate);
+  const selectedEntry = byDay.get(selectedDay) ?? null;
 
-  const selectedEntries = byDate.get(selectedIso) ?? [];
-
-  const monthStats = useMemo(() => {
-    const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
-    const inMonth = visible.filter((e) => e.date.startsWith(prefix));
-    const done = inMonth.filter((e) => e.completed);
+  const weekStats = useMemo(() => {
+    const active = entries.filter((e) => e.exercises.length > 0);
     return {
-      planned: inMonth.length,
-      completed: done.length,
-      minutes: done.reduce((a, e) => a + (e.duration || 0), 0),
+      days: active.length,
+      exercises: active.reduce((a, e) => a + e.exercises.length, 0),
+      muscles: new Set(active.flatMap((e) => e.muscleGroups)).size,
     };
-  }, [visible, year, month]);
+  }, [entries]);
 
   const shiftMonth = (delta) => setCursor(new Date(year, month + delta, 1));
   const goToday = () => {
@@ -149,31 +129,41 @@ export default function Calendar() {
     setSelectedIso(todayIso);
   };
 
-  const openAdd = (iso) => {
+  const openEditor = (iso) => {
+    const day = dayCodeOf(new Date(`${iso}T00:00:00`));
+    const entry = byDay.get(day);
     setSelectedIso(iso);
-    setForm(EMPTY_FORM);
+    setForm({ day, exerciseIds: entry?.exerciseIds ?? [], notes: entry?.notes ?? '' });
+    setPickerQuery('');
     setFormError('');
     setModalOpen(true);
   };
 
-  const handleCreate = async (e) => {
+  const toggleExercise = (id) =>
+    setForm((f) => ({
+      ...f,
+      exerciseIds: f.exerciseIds.includes(id)
+        ? f.exerciseIds.filter((x) => x !== id)
+        : [...f.exerciseIds, id],
+    }));
+
+  const handleSave = async (e) => {
     e.preventDefault();
-    if (!form.title.trim() && !form.exerciseId) {
-      setFormError('Give the session a name, or pick an exercise.');
+    if (form.exerciseIds.length === 0) {
+      setFormError('Pick at least one exercise for this day.');
       return;
     }
     setSaving(true);
     setFormError('');
     try {
-      const chosen = exercises.find((x) => String(ex.id(x)) === String(form.exerciseId));
-      const created = await api.createScheduleEntry(
-        toApiScheduleEntry({
-          ...form,
-          date: selectedIso,
-          title: form.title.trim() || (chosen ? ex.name(chosen) : 'Workout'),
-        })
-      );
-      setEntries((prev) => [...prev, normalizeScheduleEntry(created)]);
+      const body = toApiScheduleEntry(form);
+      const existing = byDay.get(form.day);
+      // day_of_week is unique per user, so an existing day is updated, not re-created.
+      const saved = existing
+        ? await api.updateScheduleEntry(existing.id, body)
+        : await api.createScheduleEntry(body);
+      const next = normalizeScheduleEntry(saved);
+      setEntries((prev) => [...prev.filter((x) => x.day !== next.day), next]);
       setModalOpen(false);
     } catch (err) {
       setFormError(err.message);
@@ -182,22 +172,9 @@ export default function Calendar() {
     }
   };
 
-  const toggleComplete = async (entry) => {
-    const next = !entry.completed;
-    setEntries((prev) => prev.map((e) => (e.id === entry.id ? { ...e, completed: next } : e)));
-    try {
-      // The backend exposes PUT, so the whole object is resent.
-      await api.updateScheduleEntry(entry.id, toApiScheduleUpdate(entry, { completed: next }));
-    } catch (err) {
-      setEntries((prev) =>
-        prev.map((e) => (e.id === entry.id ? { ...e, completed: entry.completed } : e))
-      );
-      setError(err.message);
-    }
-  };
-
   const remove = async (entry) => {
     const snapshot = entries;
+    setConfirmDelete(false);
     setEntries((prev) => prev.filter((e) => e.id !== entry.id));
     try {
       await api.deleteScheduleEntry(entry.id);
@@ -207,11 +184,22 @@ export default function Calendar() {
     }
   };
 
-  const selectedLabel = new Date(`${selectedIso}T00:00:00`).toLocaleDateString(undefined, {
+  const selectedLabel = selectedDate.toLocaleDateString(undefined, {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
   });
+
+  const pickerItems = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    if (!q) return exercises;
+    return exercises.filter(
+      (x) =>
+        ex.name(x).toLowerCase().includes(q) ||
+        ex.muscleGroup(x).includes(q) ||
+        ex.category(x).includes(q)
+    );
+  }, [exercises, pickerQuery]);
 
   return (
     <div>
@@ -221,15 +209,19 @@ export default function Calendar() {
           <p className="text-[11px] font-bold tracking-[0.18em] uppercase text-[#7CFF5B]">Planner</p>
           <h1 className="mt-1.5 text-3xl lg:text-4xl font-bold tracking-tight">My Calendar</h1>
           <p className="mt-2 text-[#B8B8B8]">
-            Plan sessions, tick them off, and keep the streak alive.
+            Set a plan for each weekday — it repeats every week.
           </p>
         </div>
         <button
-          onClick={() => openAdd(selectedIso)}
+          onClick={() => openEditor(selectedIso)}
           className="flex items-center gap-2 px-5 py-3 rounded-xl bg-[#7CFF5B] text-[#070707] font-semibold hover:bg-[#91ff75] transition-all hover:scale-[1.02]"
         >
-          <Plus className="w-4 h-4" strokeWidth={2.5} />
-          Add Session
+          {selectedEntry ? (
+            <Pencil className="w-4 h-4" strokeWidth={2.5} />
+          ) : (
+            <Plus className="w-4 h-4" strokeWidth={2.5} />
+          )}
+          {selectedEntry ? `Edit ${dayLabel(selectedDay)}` : `Plan ${dayLabel(selectedDay)}`}
         </button>
       </div>
 
@@ -247,17 +239,12 @@ export default function Calendar() {
         </div>
       )}
 
-      {/* ================= MONTH STATS ================= */}
+      {/* ================= WEEK STATS ================= */}
       <div className="grid grid-cols-3 gap-3 mb-8">
         {[
-          { label: 'Planned', value: monthStats.planned, icon: CalendarDays, color: '#5BE7FF' },
-          { label: 'Completed', value: monthStats.completed, icon: Check, color: '#7CFF5B' },
-          {
-            label: 'Minutes',
-            value: monthStats.minutes.toLocaleString(),
-            icon: Clock,
-            color: '#B75BFF',
-          },
+          { label: 'Training days / week', value: weekStats.days, icon: CalendarDays, color: '#5BE7FF' },
+          { label: 'Exercises / week', value: weekStats.exercises, icon: Dumbbell, color: '#7CFF5B' },
+          { label: 'Muscle groups', value: weekStats.muscles, icon: Activity, color: '#B75BFF' },
         ].map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="p-4 rounded-2xl bg-[#101010] border border-white/[0.06]">
             <div className="flex items-center gap-2 mb-2">
@@ -301,12 +288,12 @@ export default function Calendar() {
           </div>
 
           <div className="grid grid-cols-7 gap-1.5 mb-2">
-            {WEEKDAY_LABELS.map((d) => (
+            {DAYS.map((d) => (
               <div
-                key={d}
+                key={d.value}
                 className="text-center text-[11px] font-bold tracking-wider uppercase text-white/30 py-1"
               >
-                {d}
+                {d.short}
               </div>
             ))}
           </div>
@@ -318,15 +305,19 @@ export default function Calendar() {
           ) : (
             <div className="grid grid-cols-7 gap-1.5">
               {grid.map(({ date, iso, inMonth }) => {
-                const items = byDate.get(iso) ?? [];
+                const plan = byDay.get(dayCodeOf(date));
+                const items = plan?.exercises ?? [];
                 const isToday = iso === todayIso;
                 const isSelected = iso === selectedIso;
 
                 return (
                   <button
                     key={iso}
-                    onClick={() => setSelectedIso(iso)}
-                    onDoubleClick={() => openAdd(iso)}
+                    onClick={() => {
+                      setSelectedIso(iso);
+                      setConfirmDelete(false);
+                    }}
+                    onDoubleClick={() => openEditor(iso)}
                     className={`relative aspect-square sm:aspect-[1/0.95] p-1.5 sm:p-2 rounded-xl text-left transition-all duration-200 border ${
                       isSelected
                         ? 'bg-[#7CFF5B]/10 border-[#7CFF5B]/50'
@@ -346,16 +337,12 @@ export default function Calendar() {
                     </span>
 
                     <div className="mt-1 space-y-0.5">
-                      {items.slice(0, 2).map((s) => (
+                      {items.slice(0, 2).map((x) => (
                         <div
-                          key={`${s.id}-${s.date}`}
-                          className={`hidden sm:block truncate text-[10px] font-medium px-1.5 py-0.5 rounded ${
-                            s.completed
-                              ? 'bg-[#7CFF5B]/20 text-[#7CFF5B]'
-                              : 'bg-white/[0.07] text-white/60'
-                          }`}
+                          key={ex.id(x)}
+                          className="hidden sm:block truncate text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/[0.07] text-white/60"
                         >
-                          {s.title}
+                          {ex.name(x)}
                         </div>
                       ))}
                       {items.length > 2 && (
@@ -365,12 +352,8 @@ export default function Calendar() {
                       )}
 
                       <div className="flex sm:hidden gap-0.5 flex-wrap">
-                        {items.slice(0, 3).map((s) => (
-                          <span
-                            key={`${s.id}-${s.date}`}
-                            className="w-1.5 h-1.5 rounded-full bg-[#7CFF5B]"
-                            style={{ opacity: s.completed ? 1 : 0.4 }}
-                          />
+                        {items.slice(0, 3).map((x) => (
+                          <span key={ex.id(x)} className="w-1.5 h-1.5 rounded-full bg-[#7CFF5B]" />
                         ))}
                       </div>
                     </div>
@@ -389,106 +372,116 @@ export default function Calendar() {
                 {selectedIso === todayIso ? 'Today' : 'Selected'}
               </p>
               <h3 className="mt-1 text-lg font-bold leading-snug">{selectedLabel}</h3>
+              {selectedEntry && (
+                <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded bg-[#5BE7FF]/12 text-[#5BE7FF]">
+                  <Repeat className="w-2.5 h-2.5" />
+                  Every {dayLabel(selectedDay)}
+                </span>
+              )}
             </div>
-            <button
-              onClick={() => openAdd(selectedIso)}
-              aria-label="Add a session to this day"
-              className="w-9 h-9 shrink-0 grid place-items-center rounded-xl bg-[#7CFF5B]/12 border border-[#7CFF5B]/25 text-[#7CFF5B] hover:bg-[#7CFF5B]/20 transition"
-            >
-              <Plus className="w-4 h-4" strokeWidth={2.5} />
-            </button>
+            <div className="flex gap-1.5 shrink-0">
+              <button
+                onClick={() => openEditor(selectedIso)}
+                aria-label={selectedEntry ? 'Edit this day' : 'Plan this day'}
+                className="w-9 h-9 grid place-items-center rounded-xl bg-[#7CFF5B]/12 border border-[#7CFF5B]/25 text-[#7CFF5B] hover:bg-[#7CFF5B]/20 transition"
+              >
+                {selectedEntry ? (
+                  <Pencil className="w-4 h-4" />
+                ) : (
+                  <Plus className="w-4 h-4" strokeWidth={2.5} />
+                )}
+              </button>
+              {selectedEntry && (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  aria-label="Clear this day's plan"
+                  className="w-9 h-9 grid place-items-center rounded-xl bg-white/[0.06] text-white/50 hover:text-[#FF5B5B] hover:bg-[#FF5B5B]/10 transition"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
           </div>
 
-          {selectedEntries.length === 0 ? (
+          {confirmDelete && selectedEntry && (
+            <div className="mb-4 p-4 rounded-2xl bg-[#FF5B5B]/[0.06] border border-[#FF5B5B]/20">
+              <p className="text-sm font-semibold">Clear every {dayLabel(selectedDay)}?</p>
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="px-4 py-2 rounded-lg border border-white/10 text-xs font-medium text-white/70 hover:bg-white/[0.04] transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => remove(selectedEntry)}
+                  className="px-4 py-2 rounded-lg bg-[#FF5B5B] text-white text-xs font-bold hover:bg-[#ff7070] transition"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!selectedEntry || selectedEntry.exercises.length === 0 ? (
             <div className="py-10 text-center">
               <div className="w-12 h-12 mx-auto rounded-2xl bg-white/[0.04] grid place-items-center mb-3">
                 <CalendarDays className="w-5 h-5 text-white/25" />
               </div>
-              <p className="text-sm text-white/40">Nothing scheduled.</p>
+              <p className="text-sm text-white/40">Rest day — nothing planned.</p>
               <button
-                onClick={() => openAdd(selectedIso)}
+                onClick={() => openEditor(selectedIso)}
                 className="mt-3 text-sm font-medium text-[#7CFF5B] hover:underline"
               >
-                Plan a session
+                Plan {dayLabel(selectedDay)}
               </button>
             </div>
           ) : (
             <div className="space-y-3">
-              {selectedEntries.map((s) => (
+              {selectedEntry.muscleGroups.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedEntry.muscleGroups.map((m) => (
+                    <span
+                      key={m}
+                      className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded"
+                      style={{ backgroundColor: `${muscleColor(m)}1A`, color: muscleColor(m) }}
+                    >
+                      {humanize(m)}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {selectedEntry.exercises.map((x) => (
                 <motion.div
-                  key={`${s.id}-${s.date}`}
+                  key={ex.id(x)}
                   layout
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="group relative p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] overflow-hidden"
+                  className="relative p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] overflow-hidden"
                 >
                   <span
                     className="absolute left-0 inset-y-0 w-[3px]"
-                    style={{ backgroundColor: s.completed ? '#7CFF5B' : 'rgba(255,255,255,0.15)' }}
+                    style={{ backgroundColor: muscleColor(ex.muscleGroup(x)) }}
                   />
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p
-                        className={`font-semibold truncate ${
-                          s.completed ? 'text-white/45 line-through' : ''
-                        }`}
-                      >
-                        {s.title}
-                      </p>
-                      {s.recurring && (
-                        <span className="inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded bg-[#5BE7FF]/12 text-[#5BE7FF]">
-                          <Repeat className="w-2.5 h-2.5" />
-                          Weekly
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition">
-                      <button
-                        onClick={() => toggleComplete(s)}
-                        aria-label={s.completed ? 'Mark incomplete' : 'Mark complete'}
-                        className={`w-7 h-7 grid place-items-center rounded-lg transition ${
-                          s.completed
-                            ? 'bg-[#7CFF5B] text-[#070707]'
-                            : 'bg-white/[0.06] text-white/50 hover:text-[#7CFF5B]'
-                        }`}
-                      >
-                        <Check className="w-3.5 h-3.5" strokeWidth={3} />
-                      </button>
-                      <button
-                        onClick={() => remove(s)}
-                        aria-label="Delete session"
-                        className="w-7 h-7 grid place-items-center rounded-lg bg-white/[0.06] text-white/50 hover:text-[#FF5B5B] hover:bg-[#FF5B5B]/10 transition"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-xs text-white/40">
-                    {s.time && (
-                      <span className="flex items-center gap-1.5">
-                        <Clock className="w-3 h-3" />
-                        {s.time}
-                        {s.duration ? ` · ${s.duration} min` : ''}
-                      </span>
-                    )}
-                    {s.sets && s.reps && (
-                      <span className="flex items-center gap-1.5">
-                        <Dumbbell className="w-3 h-3" />
-                        {s.sets} × {s.reps}
-                      </span>
-                    )}
-                  </div>
-
-                  {s.notes && <p className="mt-2 text-xs text-white/35">{s.notes}</p>}
+                  <p className="font-semibold truncate">{ex.name(x)}</p>
+                  <p className="mt-1 text-xs text-white/40">
+                    {[humanize(ex.category(x)), humanize(ex.muscleGroup(x))]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </p>
                 </motion.div>
               ))}
+
+              {selectedEntry.notes && (
+                <p className="text-xs text-white/40 pt-1">{selectedEntry.notes}</p>
+              )}
             </div>
           )}
         </aside>
       </div>
 
-      {/* ================= ADD MODAL ================= */}
+      {/* ================= EDIT MODAL ================= */}
       <AnimatePresence>
         {modalOpen && (
           <div className="fixed inset-0 z-50 grid place-items-center p-4">
@@ -503,13 +496,13 @@ export default function Calendar() {
               initial={{ opacity: 0, scale: 0.96, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.96, y: 12 }}
-              onSubmit={handleCreate}
+              onSubmit={handleSave}
               className="relative w-full max-w-md rounded-3xl bg-[#0F0F0F] border border-white/10 p-6 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-start justify-between mb-6">
                 <div>
-                  <h3 className="text-xl font-bold">Add Session</h3>
-                  <p className="mt-1 text-sm text-white/40">{selectedLabel}</p>
+                  <h3 className="text-xl font-bold">{dayLabel(form.day)} plan</h3>
+                  <p className="mt-1 text-sm text-white/40">Repeats every {dayLabel(form.day)}.</p>
                 </div>
                 <button
                   type="button"
@@ -530,89 +523,81 @@ export default function Calendar() {
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm text-white/60 mb-2">Session name</label>
-                  <input
-                    autoFocus
-                    value={form.title}
-                    onChange={(e) => setForm({ ...form, title: e.target.value })}
-                    placeholder="e.g. Push Day A"
-                    className={inputCls}
-                  />
-                </div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm text-white/60">Exercises</label>
+                    <span className="text-xs text-white/35">
+                      {form.exerciseIds.length} selected
+                    </span>
+                  </div>
 
-                {exercises.length > 0 && (
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">Exercise (optional)</label>
-                    <select
-                      value={form.exerciseId}
-                      onChange={(e) => setForm({ ...form, exerciseId: e.target.value })}
-                      className={`${inputCls} appearance-none cursor-pointer`}
-                    >
-                      <option value="">— none —</option>
-                      {exercises.map((x) => (
-                        <option key={ex.id(x)} value={ex.id(x)}>
-                          {ex.name(x)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-[1.4fr_1fr] gap-3">
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">Time</label>
-                    <input
-                      type="time"
-                      value={form.time}
-                      onChange={(e) => setForm({ ...form, time: e.target.value })}
-                      className={`${inputCls} [color-scheme:dark]`}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">Minutes</label>
-                    <input
-                      type="number"
-                      min="5"
-                      max="300"
-                      value={form.duration}
-                      onChange={(e) => setForm({ ...form, duration: e.target.value })}
-                      className={inputCls}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">Sets</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={form.sets}
-                      onChange={(e) => setForm({ ...form, sets: e.target.value })}
-                      placeholder="3"
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">Reps</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={form.reps}
-                      onChange={(e) => setForm({ ...form, reps: e.target.value })}
-                      placeholder="10"
-                      className={inputCls}
-                    />
-                  </div>
+                  {exercises.length === 0 ? (
+                    <p className="text-sm text-white/40 p-4 rounded-xl bg-white/[0.03]">
+                      Your exercise library is empty. Add exercises on the Exercises page first.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="relative mb-2">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-white/30" />
+                        <input
+                          value={pickerQuery}
+                          onChange={(e) => setPickerQuery(e.target.value)}
+                          placeholder="Filter exercises…"
+                          className={`${inputCls} pl-11 h-10`}
+                        />
+                      </div>
+                      <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
+                        {pickerItems.map((x) => {
+                          const id = ex.id(x);
+                          const on = form.exerciseIds.includes(id);
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              onClick={() => toggleExercise(id)}
+                              className={`w-full flex items-center gap-3 p-3 rounded-xl text-left border transition ${
+                                on
+                                  ? 'bg-[#7CFF5B]/10 border-[#7CFF5B]/40'
+                                  : 'bg-white/[0.02] border-white/[0.06] hover:border-white/15'
+                              }`}
+                            >
+                              <span
+                                className={`w-5 h-5 shrink-0 rounded-md border grid place-items-center ${
+                                  on ? 'bg-[#7CFF5B] border-[#7CFF5B]' : 'border-white/20'
+                                }`}
+                              >
+                                {on && (
+                                  <Check className="w-3.5 h-3.5 text-[#070707]" strokeWidth={3} />
+                                )}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-medium truncate">
+                                  {ex.name(x)}
+                                </span>
+                                <span className="block text-[11px] text-white/35">
+                                  {[humanize(ex.category(x)), humanize(ex.muscleGroup(x))]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                </span>
+                              </span>
+                            </button>
+                          );
+                        })}
+                        {pickerItems.length === 0 && (
+                          <p className="text-xs text-white/35 p-3">No matches.</p>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div>
                   <label className="block text-sm text-white/60 mb-2">Notes (optional)</label>
                   <textarea
-                    rows={3}
+                    rows={2}
+                    maxLength={255}
                     value={form.notes}
                     onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                    placeholder="Focus points, target weights…"
+                    placeholder="e.g. Push day — focus on form"
                     className={`${inputCls} h-auto py-3 resize-none`}
                   />
                 </div>
@@ -628,11 +613,11 @@ export default function Calendar() {
                 </button>
                 <button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || exercises.length === 0}
                   className="flex-1 h-12 rounded-xl bg-[#7CFF5B] text-[#070707] font-bold hover:bg-[#91ff75] transition disabled:opacity-60 flex items-center justify-center gap-2"
                 >
                   {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {saving ? 'Saving…' : 'Add Session'}
+                  {saving ? 'Saving…' : 'Save plan'}
                 </button>
               </div>
             </motion.form>

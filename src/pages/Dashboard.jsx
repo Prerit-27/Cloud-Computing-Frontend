@@ -2,12 +2,11 @@ import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import {
-  Flame,
   Dumbbell,
-  Clock,
   ArrowRight,
   CalendarDays,
-  CheckCircle2,
+  Activity,
+  ListChecks,
   AlertCircle,
   RefreshCw,
 } from 'lucide-react';
@@ -15,12 +14,12 @@ import * as api from '../utils/api';
 import { useAuth } from '../context/auth-context';
 import {
   normalizeScheduleEntry,
-  expandToRange,
   deriveStats,
-  toISODate,
+  dayCodeOf,
   userFields,
   exerciseFields as ex,
   categoryColor,
+  muscleColor,
   humanize,
 } from '../utils/adapters';
 import BodyMap from '../components/MuscleGroup/BodyMap';
@@ -35,16 +34,7 @@ export default function Dashboard() {
   const fetchStats = useCallback(async () => {
     try {
       const raw = await api.listSchedule();
-      const normalized = raw.map(normalizeScheduleEntry);
-
-      // Project weekday templates across a window wide enough for the widgets.
-      const today = new Date();
-      const from = new Date(today);
-      from.setDate(today.getDate() - 60);
-      const to = new Date(today);
-      to.setDate(today.getDate() + 30);
-
-      setStats(deriveStats(expandToRange(normalized, toISODate(from), toISODate(to)), today));
+      setStats(deriveStats(raw.map(normalizeScheduleEntry)));
       setError('');
     } catch (err) {
       setError(err.message);
@@ -70,7 +60,8 @@ export default function Dashboard() {
   const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const firstName = userFields.firstName(user) || userFields.username(user) || 'there';
 
-  const remaining = stats ? Math.max(0, stats.thisWeek.planned - stats.thisWeek.done) : 0;
+  const todayCode = dayCodeOf(new Date());
+  const todayCount = stats?.today?.exercises.length ?? 0;
 
   return (
     <div>
@@ -83,11 +74,11 @@ export default function Dashboard() {
         </h1>
         {stats && (
           <p className="mt-2 text-[#B8B8B8]">
-            {stats.thisWeek.planned === 0
-              ? 'Nothing planned this week yet — add a session to get going.'
-              : remaining === 0
-                ? "Everything planned for this week is done. Nice work."
-                : `${remaining} session${remaining === 1 ? '' : 's'} left to finish this week.`}
+            {stats.trainingDays === 0
+              ? 'No weekly plan yet — set one up in the calendar to get going.'
+              : todayCount === 0
+                ? 'Rest day today. Recover well.'
+                : `${todayCount} exercise${todayCount === 1 ? '' : 's'} on today's plan.`}
           </p>
         )}
       </div>
@@ -110,26 +101,26 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         {[
           {
-            label: 'Current streak',
-            value: stats ? `${stats.currentStreak} day${stats.currentStreak === 1 ? '' : 's'}` : '—',
-            icon: Flame,
+            label: 'Training days / week',
+            value: stats?.trainingDays ?? '—',
+            icon: CalendarDays,
             color: '#FF5B8A',
           },
           {
-            label: 'Sessions done',
-            value: stats?.totalSessions ?? '—',
-            icon: CheckCircle2,
+            label: 'Exercises / week',
+            value: stats?.exercisesScheduled ?? '—',
+            icon: ListChecks,
             color: '#7CFF5B',
           },
           {
-            label: 'Minutes trained',
-            value: stats ? stats.totalMinutes.toLocaleString() : '—',
-            icon: Clock,
+            label: 'Muscle groups trained',
+            value: stats?.muscleGroups.length ?? '—',
+            icon: Activity,
             color: '#5BE7FF',
           },
           {
-            label: 'Exercises',
-            value: exercises.length || '—',
+            label: 'Exercises in library',
+            value: exercises.length,
             icon: Dumbbell,
             color: '#B75BFF',
           },
@@ -153,12 +144,12 @@ export default function Dashboard() {
           <section className="p-6 rounded-3xl bg-[#101010] border border-white/[0.06]">
             <div className="flex items-end justify-between mb-6">
               <div>
-                <h2 className="text-lg font-bold">This Week</h2>
-                <p className="text-sm text-white/40 mt-0.5">Minutes trained per day</p>
+                <h2 className="text-lg font-bold">Weekly Plan</h2>
+                <p className="text-sm text-white/40 mt-0.5">Exercises planned per day</p>
               </div>
               {stats && (
                 <span className="px-3 py-1.5 rounded-lg bg-[#7CFF5B]/12 text-[#7CFF5B] text-xs font-bold">
-                  {stats.thisWeek.done}/{stats.thisWeek.planned} done
+                  {stats.trainingDays}/7 days
                 </span>
               )}
             </div>
@@ -168,29 +159,34 @@ export default function Dashboard() {
             ) : (
               <div className="flex items-end gap-2 sm:gap-3 h-44">
                 {(stats?.week ?? []).map((d) => {
-                  const max = Math.max(...stats.week.map((x) => x.minutes), 1);
+                  const max = Math.max(...stats.week.map((x) => x.count), 1);
+                  const isToday = d.code === todayCode;
                   return (
                     <div
                       key={d.day}
                       className="flex-1 h-full flex flex-col items-center justify-end gap-2"
                     >
                       <span className="text-[10px] text-white/35 font-medium">
-                        {d.minutes ? `${d.minutes}m` : '—'}
+                        {d.count || '—'}
                       </span>
                       <div className="w-full flex-1 flex items-end">
                         <motion.div
                           initial={{ height: 0 }}
-                          animate={{ height: `${Math.max((d.minutes / max) * 100, 3)}%` }}
+                          animate={{ height: `${Math.max((d.count / max) * 100, 3)}%` }}
                           transition={{ duration: 0.6, ease: 'easeOut' }}
                           className="w-full rounded-t-lg"
                           style={{
-                            background: d.minutes
+                            background: d.count
                               ? 'linear-gradient(180deg, #7CFF5B, #7CFF5B60)'
                               : 'rgba(255,255,255,0.05)',
                           }}
                         />
                       </div>
-                      <span className="text-xs text-white/45">{d.day}</span>
+                      <span
+                        className={`text-xs ${isToday ? 'text-[#7CFF5B] font-bold' : 'text-white/45'}`}
+                      >
+                        {d.day}
+                      </span>
                     </div>
                   );
                 })}
@@ -224,11 +220,10 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="space-y-2.5">
-                {stats.upcoming.slice(0, 4).map((s) => {
-                  const d = new Date(`${s.date}T00:00:00`);
+                {stats.upcoming.slice(0, 4).map(({ date: d, entry }) => {
                   return (
                     <div
-                      key={`${s.id}-${s.date}`}
+                      key={d.toDateString()}
                       className="flex items-center gap-4 p-4 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:border-white/15 transition"
                     >
                       <div className="w-12 shrink-0 text-center">
@@ -239,11 +234,11 @@ export default function Dashboard() {
                       </div>
                       <div className="w-px self-stretch bg-white/[0.08]" />
                       <div className="min-w-0 flex-1">
-                        <p className="font-semibold truncate">{s.title}</p>
-                        <p className="text-xs text-white/35 mt-0.5">
-                          {[s.time, s.duration ? `${s.duration} min` : null]
-                            .filter(Boolean)
-                            .join(' · ') || 'No time set'}
+                        <p className="font-semibold truncate">
+                          {entry.exercises.map((x) => ex.name(x)).join(', ')}
+                        </p>
+                        <p className="text-xs text-white/35 mt-0.5 truncate">
+                          {entry.muscleGroups.map(humanize).join(' · ') || entry.notes || '—'}
                         </p>
                       </div>
                     </div>
@@ -295,7 +290,8 @@ export default function Dashboard() {
             ) : (
               <div className="space-y-2">
                 {exercises.slice(0, 5).map((x) => {
-                  const cat = ex.category(x);
+                  const cat = ex.muscleGroup(x) || ex.category(x);
+                  const color = ex.muscleGroup(x) ? muscleColor(cat) : categoryColor(cat);
                   return (
                     <div
                       key={ex.id(x)}
@@ -305,10 +301,7 @@ export default function Dashboard() {
                       {cat && (
                         <span
                           className="shrink-0 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded"
-                          style={{
-                            backgroundColor: `${categoryColor(cat)}1A`,
-                            color: categoryColor(cat),
-                          }}
+                          style={{ backgroundColor: `${color}1A`, color }}
                         >
                           {humanize(cat)}
                         </span>

@@ -16,19 +16,44 @@ import {
   exerciseFields as ex,
   toApiExercise,
   EXERCISE_CATEGORIES,
+  MUSCLE_GROUPS,
   categoryColor,
+  muscleColor,
   humanize,
 } from '../utils/adapters';
 
 const EMPTY_FORM = {
   name: '',
   description: '',
-  category: '',
-  equipment: '',
-  difficulty: '',
-  sets: '',
-  reps: '',
+  category: 'strength',
+  muscleGroup: '',
 };
+
+/** Chip picker for a fixed set of choices. */
+function ChoiceChips({ options, value, onChange, colorOf, allowNone = false }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((c) => {
+        const on = value === c;
+        return (
+          <button
+            key={c}
+            type="button"
+            onClick={() => onChange(on && allowNone ? '' : c)}
+            className="px-3.5 py-2 rounded-xl text-xs font-semibold border transition"
+            style={{
+              borderColor: on ? colorOf(c) : 'rgba(255,255,255,0.10)',
+              backgroundColor: on ? `${colorOf(c)}1A` : 'transparent',
+              color: on ? colorOf(c) : 'rgba(255,255,255,0.55)',
+            }}
+          >
+            {humanize(c)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 const inputCls =
   'w-full h-12 px-4 rounded-xl bg-[#151515] border border-white/10 text-white outline-none transition focus:border-[#7CFF5B] focus:ring-1 focus:ring-[#7CFF5B] placeholder:text-white/25';
@@ -39,7 +64,7 @@ export default function Exercises() {
   const [error, setError] = useState('');
 
   const [query, setQuery] = useState('');
-  const [category, setCategory] = useState('');
+  const [muscle, setMuscle] = useState('');
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null); // null = create mode
@@ -80,24 +105,18 @@ export default function Exercises() {
     return () => window.removeEventListener('keydown', onKey);
   }, [modalOpen]);
 
-  /** Categories actually present in the data, falling back to the enum. */
-  const categories = useMemo(() => {
-    const found = [...new Set(items.map((i) => ex.category(i)).filter(Boolean))];
-    return found.length ? found : EXERCISE_CATEGORIES;
-  }, [items]);
-
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((i) => {
-      if (category && String(ex.category(i)).toLowerCase() !== category.toLowerCase()) return false;
+      if (muscle && ex.muscleGroup(i) !== muscle) return false;
       if (!q) return true;
       return (
         ex.name(i).toLowerCase().includes(q) ||
         ex.description(i).toLowerCase().includes(q) ||
-        String(ex.category(i)).toLowerCase().includes(q)
+        ex.category(i).includes(q)
       );
     });
-  }, [items, query, category]);
+  }, [items, query, muscle]);
 
   const openCreate = () => {
     setEditing(null);
@@ -111,11 +130,8 @@ export default function Exercises() {
     setForm({
       name: ex.name(item),
       description: ex.description(item),
-      category: ex.category(item) ?? '',
-      equipment: ex.equipment(item) ?? '',
-      difficulty: ex.difficulty(item) ?? '',
-      sets: ex.sets(item) ?? '',
-      reps: ex.reps(item) ?? '',
+      category: ex.category(item) || 'strength',
+      muscleGroup: ex.muscleGroup(item),
     });
     setFormError('');
     setModalOpen(true);
@@ -191,26 +207,26 @@ export default function Exercises() {
         </div>
         <div className="flex gap-2 overflow-x-auto pb-1">
           <button
-            onClick={() => setCategory('')}
+            onClick={() => setMuscle('')}
             className={`px-4 h-12 shrink-0 rounded-xl text-sm font-semibold border transition ${
-              category === ''
+              muscle === ''
                 ? 'bg-[#7CFF5B] text-[#070707] border-[#7CFF5B]'
                 : 'border-white/10 text-white/55 hover:border-white/25'
             }`}
           >
             All
           </button>
-          {categories.map((c) => {
-            const on = category === c;
+          {MUSCLE_GROUPS.map((c) => {
+            const on = muscle === c;
             return (
               <button
                 key={c}
-                onClick={() => setCategory(on ? '' : c)}
+                onClick={() => setMuscle(on ? '' : c)}
                 className="px-4 h-12 shrink-0 rounded-xl text-sm font-semibold border transition"
                 style={{
-                  borderColor: on ? categoryColor(c) : 'rgba(255,255,255,0.10)',
-                  backgroundColor: on ? `${categoryColor(c)}1A` : 'transparent',
-                  color: on ? categoryColor(c) : 'rgba(255,255,255,0.55)',
+                  borderColor: on ? muscleColor(c) : 'rgba(255,255,255,0.10)',
+                  backgroundColor: on ? `${muscleColor(c)}1A` : 'transparent',
+                  color: on ? muscleColor(c) : 'rgba(255,255,255,0.55)',
                 }}
               >
                 {humanize(c)}
@@ -256,7 +272,7 @@ export default function Exercises() {
           <p className="mt-1 text-sm text-white/40">
             {items.length === 0
               ? 'Add your first exercise to get started.'
-              : 'Try a different search or category.'}
+              : 'Try a different search or muscle group.'}
           </p>
           {items.length === 0 && (
             <button
@@ -273,7 +289,8 @@ export default function Exercises() {
             {visible.map((item) => {
               const id = ex.id(item);
               const cat = ex.category(item);
-              const color = categoryColor(cat);
+              const mg = ex.muscleGroup(item);
+              const color = mg ? muscleColor(mg) : categoryColor(cat);
 
               return (
                 <motion.article
@@ -309,30 +326,30 @@ export default function Exercises() {
                     </div>
                   </div>
 
-                  {cat && (
-                    <span
-                      className="inline-block mt-2.5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded"
-                      style={{ backgroundColor: `${color}1A`, color }}
-                    >
-                      {humanize(cat)}
-                    </span>
-                  )}
+                  <div className="flex flex-wrap gap-1.5 mt-2.5">
+                    {cat && (
+                      <span
+                        className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded"
+                        style={{ backgroundColor: `${categoryColor(cat)}1A`, color: categoryColor(cat) }}
+                      >
+                        {humanize(cat)}
+                      </span>
+                    )}
+                    {mg && (
+                      <span
+                        className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded"
+                        style={{ backgroundColor: `${muscleColor(mg)}1A`, color: muscleColor(mg) }}
+                      >
+                        {humanize(mg)}
+                      </span>
+                    )}
+                  </div>
 
                   {ex.description(item) && (
                     <p className="mt-3 text-sm text-[#B8B8B8] line-clamp-3 leading-relaxed">
                       {ex.description(item)}
                     </p>
                   )}
-
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4 text-xs text-white/40">
-                    {ex.equipment(item) && <span>{humanize(ex.equipment(item))}</span>}
-                    {ex.difficulty(item) && <span>{humanize(ex.difficulty(item))}</span>}
-                    {ex.sets(item) && ex.reps(item) && (
-                      <span>
-                        {ex.sets(item)} × {ex.reps(item)}
-                      </span>
-                    )}
-                  </div>
 
                   {/* Inline delete confirmation */}
                   <AnimatePresence>
@@ -345,7 +362,9 @@ export default function Exercises() {
                       >
                         <div>
                           <p className="text-sm font-semibold">Delete this exercise?</p>
-                          <p className="mt-1 text-xs text-white/40">This cannot be undone.</p>
+                          <p className="mt-1 text-xs text-white/40">
+                            It is also removed from any weekly plan. This cannot be undone.
+                          </p>
                           <div className="flex gap-2 mt-4">
                             <button
                               onClick={() => setConfirmId(null)}
@@ -424,26 +443,25 @@ export default function Exercises() {
 
                 <div>
                   <label className="block text-sm text-white/60 mb-2">Category</label>
-                  <div className="flex flex-wrap gap-2">
-                    {EXERCISE_CATEGORIES.map((c) => {
-                      const on = form.category === c;
-                      return (
-                        <button
-                          key={c}
-                          type="button"
-                          onClick={() => setForm({ ...form, category: on ? '' : c })}
-                          className="px-3.5 py-2 rounded-xl text-xs font-semibold border transition"
-                          style={{
-                            borderColor: on ? categoryColor(c) : 'rgba(255,255,255,0.10)',
-                            backgroundColor: on ? `${categoryColor(c)}1A` : 'transparent',
-                            color: on ? categoryColor(c) : 'rgba(255,255,255,0.55)',
-                          }}
-                        >
-                          {humanize(c)}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <ChoiceChips
+                    options={EXERCISE_CATEGORIES}
+                    value={form.category}
+                    onChange={(v) => setForm({ ...form, category: v })}
+                    colorOf={categoryColor}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-white/60 mb-2">
+                    Muscle group (optional)
+                  </label>
+                  <ChoiceChips
+                    options={MUSCLE_GROUPS}
+                    value={form.muscleGroup}
+                    onChange={(v) => setForm({ ...form, muscleGroup: v })}
+                    colorOf={muscleColor}
+                    allowNone
+                  />
                 </div>
 
                 <div>
@@ -455,53 +473,6 @@ export default function Exercises() {
                     placeholder="How the movement is performed, cues, setup…"
                     className={`${inputCls} h-auto py-3 resize-none`}
                   />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">Equipment</label>
-                    <input
-                      value={form.equipment}
-                      onChange={(e) => setForm({ ...form, equipment: e.target.value })}
-                      placeholder="Barbell"
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">Difficulty</label>
-                    <select
-                      value={form.difficulty}
-                      onChange={(e) => setForm({ ...form, difficulty: e.target.value })}
-                      className={`${inputCls} appearance-none cursor-pointer`}
-                    >
-                      <option value="">—</option>
-                      <option value="beginner">Beginner</option>
-                      <option value="intermediate">Intermediate</option>
-                      <option value="advanced">Advanced</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">Default sets</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={form.sets}
-                      onChange={(e) => setForm({ ...form, sets: e.target.value })}
-                      placeholder="3"
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm text-white/60 mb-2">Default reps</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={form.reps}
-                      onChange={(e) => setForm({ ...form, reps: e.target.value })}
-                      placeholder="10"
-                      className={inputCls}
-                    />
-                  </div>
                 </div>
               </div>
 

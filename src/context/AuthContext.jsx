@@ -36,28 +36,46 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
-  const signIn = useCallback(async (credentials) => {
-    const data = await api.login(credentials);
-    // Some backends return the user with the token, some only the token.
-    const me = data?.user ?? (await api.getProfile());
-    setUser(me);
-    setStatus('authed');
-    return me;
+  // /login/ and /register/ return {id, username, email, date_joined}; /profile/
+  // returns names, bio, phone and picture. Merge both into one user object.
+  const loadMe = useCallback(async (base) => {
+    const profile = await api.getProfile();
+    return { ...base, ...profile };
   }, []);
 
-  const signUp = useCallback(async (payload) => {
-    const data = await api.register(payload);
+  const signIn = useCallback(
+    async (credentials) => {
+      const data = await api.login(credentials);
+      const me = await loadMe(data?.user);
+      setUser(me);
+      setStatus('authed');
+      return me;
+    },
+    [loadMe]
+  );
 
-    // If registration did not hand back a token, the user must log in.
-    if (!api.auth.isAuthenticated()) {
-      setStatus('anon');
-      return null;
-    }
-    const me = data?.user ?? (await api.getProfile());
-    setUser(me);
-    setStatus('authed');
-    return me;
-  }, []);
+  const signUp = useCallback(
+    async (payload, profileExtras) => {
+      const data = await api.register(payload);
+      if (!api.auth.isAuthenticated()) {
+        setStatus('anon');
+        return null;
+      }
+      // Register only accepts username/email/password; names go via PATCH.
+      if (profileExtras && Object.keys(profileExtras).length) {
+        try {
+          await api.updateProfile(profileExtras);
+        } catch {
+          /* non-fatal: the account exists, names can be set on the profile page */
+        }
+      }
+      const me = await loadMe(data?.user);
+      setUser(me);
+      setStatus('authed');
+      return me;
+    },
+    [loadMe]
+  );
 
   const signOut = useCallback(async () => {
     await api.logout();
@@ -65,15 +83,22 @@ export function AuthProvider({ children }) {
     setStatus('anon');
   }, []);
 
+  /** Drops local session state without calling /logout/ (token already invalid). */
+  const clearSession = useCallback(() => {
+    api.auth.clearToken();
+    setUser(null);
+    setStatus('anon');
+  }, []);
+
   const refreshUser = useCallback(async () => {
-    const me = await api.getProfile();
-    setUser(me);
-    return me;
+    const profile = await api.getProfile();
+    setUser((prev) => ({ ...prev, ...profile }));
+    return profile;
   }, []);
 
   const patchUser = useCallback(async (patch) => {
     const updated = await api.updateProfile(patch);
-    setUser(updated);
+    setUser((prev) => ({ ...prev, ...updated }));
     return updated;
   }, []);
 
@@ -94,6 +119,7 @@ export function AuthProvider({ children }) {
         signIn,
         signUp,
         signOut,
+        clearSession,
         refreshUser,
         patchUser,
         deleteAccount,

@@ -1,50 +1,38 @@
 /**
  * ============================================================================
- *  FIELD ADAPTERS — the ONLY file that knows your Django field names.
+ *  FIELD ADAPTERS — the ONLY file that knows the Django field names.
  * ============================================================================
  *
- * Components never touch raw API fields; they call the helpers below. So when
- * a serializer field is named differently than guessed, you fix it HERE and
- * nowhere else.
+ * Components never touch raw API fields; they call the helpers below. Field
+ * names here match the backend serializers exactly:
  *
- * Every getter uses `pick()`, which tries several plausible names and returns
- * the first one present. That means a wrong guess degrades to a blank value
- * instead of crashing the page. Once you confirm the real names from
- * /api/schema/, trim each list down to the single correct field.
- *
- * `toApi*` functions build request bodies. Those DO need to be exact — a wrong
- * key there means the backend ignores or rejects the value.
+ *   UserSerializer      (login/register)  id, username, email, date_joined
+ *   ProfileSerializer   (/profile/)       username (read-only), email,
+ *                                         first_name, last_name, bio,
+ *                                         phone_number, profile_picture_url,
+ *                                         updated_at
+ *   ExerciseSerializer                    id, name, category, muscle_group,
+ *                                         description, created_by,
+ *                                         created_at, updated_at
+ *   WorkoutScheduleSerializer             id, day_of_week, exercises (read),
+ *                                         exercise_ids (write), muscle_groups,
+ *                                         notes, created_at, updated_at
  */
-
-/** First defined, non-empty value among the given keys. */
-function pick(obj, ...keys) {
-  if (!obj) return undefined;
-  for (const k of keys) {
-    const v = obj[k];
-    if (v !== undefined && v !== null && v !== '') return v;
-  }
-  return undefined;
-}
 
 /* ========================================================================== */
 /* USER / PROFILE                                                             */
 /* ========================================================================== */
 
 export const userFields = {
-  id: (u) => pick(u, 'id', 'pk'),
-  username: (u) => pick(u, 'username', 'user_name') ?? '',
-  email: (u) => pick(u, 'email') ?? '',
-  firstName: (u) => pick(u, 'first_name', 'firstName') ?? '',
-  lastName: (u) => pick(u, 'last_name', 'lastName') ?? '',
-  bio: (u) => pick(u, 'bio', 'about') ?? '',
-  location: (u) => pick(u, 'location', 'city') ?? '',
-  avatar: (u) => pick(u, 'profile_picture', 'profile_pic', 'avatar', 'image', 'picture') ?? null,
-  dateJoined: (u) => pick(u, 'date_joined', 'created_at', 'joined_at'),
-  dateOfBirth: (u) => pick(u, 'date_of_birth', 'birth_date', 'dob') ?? '',
-  height: (u) => pick(u, 'height', 'height_cm'),
-  weight: (u) => pick(u, 'weight', 'weight_kg'),
-  goal: (u) => pick(u, 'goal', 'primary_goal', 'fitness_goal') ?? '',
-  experience: (u) => pick(u, 'experience', 'experience_level', 'level') ?? '',
+  id: (u) => u?.id,
+  username: (u) => u?.username ?? '',
+  email: (u) => u?.email ?? '',
+  firstName: (u) => u?.first_name ?? '',
+  lastName: (u) => u?.last_name ?? '',
+  bio: (u) => u?.bio ?? '',
+  phone: (u) => u?.phone_number ?? '',
+  avatar: (u) => u?.profile_picture_url || null,
+  dateJoined: (u) => u?.date_joined,
 };
 
 export function displayName(u) {
@@ -60,7 +48,7 @@ export function initialsOf(u) {
   return (userFields.username(u)?.[0] ?? 'U').toUpperCase();
 }
 
-/** Absolute URL for an uploaded image (Django returns a relative MEDIA path). */
+/** Absolute URL for an image. Supabase returns absolute public URLs already. */
 export function mediaUrl(path) {
   if (!path) return null;
   if (/^https?:\/\//i.test(path)) return path;
@@ -71,98 +59,85 @@ export function mediaUrl(path) {
   return `${origin}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
-/** PATCH /api/profile/ body. Only sends keys the form actually changed. */
+/**
+ * PATCH /api/profile/ body. `username` is read-only on the backend, so it is
+ * never sent. Empty strings are sent so a field can be cleared.
+ */
 export function toApiProfile(draft) {
   const body = {};
   const map = {
-    username: 'username',
     email: 'email',
     firstName: 'first_name',
     lastName: 'last_name',
     bio: 'bio',
-    location: 'location',
-    dateOfBirth: 'date_of_birth',
-    height: 'height',
-    weight: 'weight',
-    goal: 'goal',
-    experience: 'experience',
+    phone: 'phone_number',
   };
   for (const [local, remote] of Object.entries(map)) {
-    if (draft[local] !== undefined && draft[local] !== '') body[remote] = draft[local];
+    if (draft[local] !== undefined) body[remote] = draft[local];
   }
   return body;
 }
 
 /** POST /api/profile/change-password/ body. */
-export function toApiPasswordChange({ current, next, confirm }) {
-  return {
-    old_password: current,
-    new_password: next,
-    confirm_password: confirm,
-  };
+export function toApiPasswordChange({ current, next }) {
+  return { old_password: current, new_password: next };
 }
 
-/** Form field name used by POST /api/profile/upload-picture/. */
-export const PROFILE_PICTURE_FIELD = 'profile_picture';
+/** Multipart field name expected by POST /api/profile/upload-picture/. */
+export const PROFILE_PICTURE_FIELD = 'image';
 
 /* ========================================================================== */
 /* EXERCISES                                                                  */
 /* ========================================================================== */
 
 export const exerciseFields = {
-  id: (e) => pick(e, 'id', 'pk'),
-  name: (e) => pick(e, 'name', 'title', 'exercise_name') ?? 'Untitled exercise',
-  description: (e) => pick(e, 'description', 'notes', 'instructions') ?? '',
-  category: (e) => pick(e, 'category', 'muscle_group', 'type') ?? '',
-  equipment: (e) => pick(e, 'equipment', 'gear') ?? '',
-  difficulty: (e) => pick(e, 'difficulty', 'level') ?? '',
-  sets: (e) => pick(e, 'sets', 'default_sets'),
-  reps: (e) => pick(e, 'reps', 'default_reps'),
-  image: (e) => mediaUrl(pick(e, 'image', 'picture', 'photo')),
+  id: (e) => e?.id,
+  name: (e) => e?.name || 'Untitled exercise',
+  description: (e) => e?.description ?? '',
+  category: (e) => e?.category ?? '',
+  muscleGroup: (e) => e?.muscle_group ?? '',
+  createdBy: (e) => e?.created_by ?? null,
 };
 
 /** POST /api/exercises/create/ and PATCH /api/exercises/{id}/ body. */
 export function toApiExercise(form) {
-  const body = {
-    name: form.name,
+  return {
+    name: form.name.trim(),
     description: form.description ?? '',
+    category: form.category || 'strength',
+    muscle_group: form.muscleGroup ?? '',
   };
-  if (form.category) body.category = form.category;
-  if (form.equipment) body.equipment = form.equipment;
-  if (form.difficulty) body.difficulty = form.difficulty;
-  if (form.sets !== '' && form.sets != null) body.sets = Number(form.sets);
-  if (form.reps !== '' && form.reps != null) body.reps = Number(form.reps);
-  return body;
 }
 
-/**
- * Category choices. Replace with the real CategoryEnum values from
- * /api/schema/ — the labels are just prettified versions of the value.
- */
-export const EXERCISE_CATEGORIES = [
-  'chest',
-  'back',
-  'shoulders',
-  'arms',
-  'legs',
-  'core',
-  'cardio',
-  'full_body',
-];
+/** Exercise.CATEGORY_CHOICES */
+export const EXERCISE_CATEGORIES = ['strength', 'cardio', 'flexibility', 'balance'];
+
+/** Exercise.MUSCLE_GROUP_CHOICES (blank allowed) */
+export const MUSCLE_GROUPS = ['chest', 'back', 'legs', 'arms', 'shoulders', 'core', 'full_body'];
 
 export const CATEGORY_COLORS = {
+  strength: '#7CFF5B',
+  cardio: '#FF8A5B',
+  flexibility: '#B75BFF',
+  balance: '#5BE7FF',
+};
+
+export const MUSCLE_COLORS = {
   chest: '#7CFF5B',
   back: '#5BE7FF',
   shoulders: '#B75BFF',
   arms: '#FF5B8A',
   legs: '#FFB85B',
   core: '#5B7CFF',
-  cardio: '#FF8A5B',
   full_body: '#5BFFC8',
 };
 
 export function categoryColor(value) {
   return CATEGORY_COLORS[String(value).toLowerCase()] ?? '#8A8A8A';
+}
+
+export function muscleColor(value) {
+  return MUSCLE_COLORS[String(value).toLowerCase()] ?? '#8A8A8A';
 }
 
 /** 'full_body' -> 'Full Body' */
@@ -174,120 +149,55 @@ export function humanize(value) {
 }
 
 /* ========================================================================== */
-/* SCHEDULE                                                                   */
+/* SCHEDULE — one plan per weekday (unique per user + day_of_week)            */
 /* ========================================================================== */
 
-export const WEEKDAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+/** WorkoutSchedule.DAY_CHOICES, Monday first. */
+export const DAYS = [
+  { value: 'mon', label: 'Monday', short: 'Mon' },
+  { value: 'tue', label: 'Tuesday', short: 'Tue' },
+  { value: 'wed', label: 'Wednesday', short: 'Wed' },
+  { value: 'thu', label: 'Thursday', short: 'Thu' },
+  { value: 'fri', label: 'Friday', short: 'Fri' },
+  { value: 'sat', label: 'Saturday', short: 'Sat' },
+  { value: 'sun', label: 'Sunday', short: 'Sun' },
+];
 
-export const scheduleFields = {
-  id: (s) => pick(s, 'id', 'pk'),
-  title: (s) =>
-    pick(s, 'title', 'name', 'workout_name') ??
-    // Some APIs only nest the exercise; fall back to its name.
-    (typeof s?.exercise === 'object' ? exerciseFields.name(s.exercise) : undefined) ??
-    'Workout',
-  /** ISO YYYY-MM-DD, or undefined for a weekday-based schedule. */
-  date: (s) => {
-    const raw = pick(s, 'date', 'scheduled_date', 'day');
-    if (!raw) return undefined;
-    // A weekday name in `day` is not a date.
-    if (WEEKDAYS.includes(String(raw).toLowerCase())) return undefined;
-    return String(raw).slice(0, 10);
-  },
-  /** Lowercase weekday name, or undefined for a date-based schedule. */
-  weekday: (s) => {
-    const raw = pick(s, 'day_of_week', 'weekday', 'day');
-    if (raw == null) return undefined;
-    if (typeof raw === 'number') return WEEKDAYS[raw % 7];
-    const lower = String(raw).toLowerCase();
-    return WEEKDAYS.includes(lower) ? lower : undefined;
-  },
-  time: (s) => {
-    const raw = pick(s, 'time', 'start_time', 'scheduled_time');
-    return raw ? String(raw).slice(0, 5) : '';
-  },
-  duration: (s) => Number(pick(s, 'duration', 'duration_minutes', 'minutes') ?? 0),
-  notes: (s) => pick(s, 'notes', 'description') ?? '',
-  completed: (s) => Boolean(pick(s, 'completed', 'is_completed', 'done') ?? false),
-  /** Exercise id whether the API nests the object or returns a bare id. */
-  exerciseId: (s) => {
-    const raw = s?.exercise ?? s?.exercise_id;
-    return typeof raw === 'object' ? exerciseFields.id(raw) : raw;
-  },
-  sets: (s) => pick(s, 'sets'),
-  reps: (s) => pick(s, 'reps'),
-};
+const DAY_INDEX = Object.fromEntries(DAYS.map((d, i) => [d.value, i]));
 
-/**
- * Normalised shape the calendar UI works with. `date` is always an ISO string:
- * a weekday-only entry is projected onto that weekday of the visible week.
- */
+export function dayLabel(code) {
+  return DAYS[DAY_INDEX[code]]?.label ?? humanize(code);
+}
+
+/** Day code ('mon'…'sun') for a Date. */
+export function dayCodeOf(date) {
+  return DAYS[(date.getDay() + 6) % 7].value;
+}
+
 export function normalizeScheduleEntry(raw) {
+  const exercises = Array.isArray(raw?.exercises) ? raw.exercises : [];
   return {
-    id: scheduleFields.id(raw),
-    title: scheduleFields.title(raw),
-    date: scheduleFields.date(raw),
-    weekday: scheduleFields.weekday(raw),
-    time: scheduleFields.time(raw),
-    duration: scheduleFields.duration(raw),
-    notes: scheduleFields.notes(raw),
-    completed: scheduleFields.completed(raw),
-    exerciseId: scheduleFields.exerciseId(raw),
-    sets: scheduleFields.sets(raw),
-    reps: scheduleFields.reps(raw),
-    raw, // kept so PUT can resend untouched fields
+    id: raw?.id,
+    day: raw?.day_of_week,
+    exercises,
+    exerciseIds: exercises.map((e) => e.id),
+    muscleGroups: (raw?.muscle_groups ?? []).filter(Boolean),
+    notes: raw?.notes ?? '',
   };
 }
 
-/**
- * POST /api/schedule/create/ body.
- * Sends both `date` and `day_of_week` so it works whether your model is
- * date-based or weekday-based — drop whichever one your serializer rejects.
- */
-export function toApiScheduleEntry(form) {
-  const body = {
-    title: form.title,
-    date: form.date,
-    day_of_week: weekdayOf(form.date),
+/** The backend orders by day code alphabetically; this sorts Mon → Sun. */
+export function sortByDay(entries) {
+  return [...entries].sort((a, b) => (DAY_INDEX[a.day] ?? 9) - (DAY_INDEX[b.day] ?? 9));
+}
+
+/** POST /api/schedule/create/ and PUT /api/schedule/{id}/ body (full object). */
+export function toApiScheduleEntry({ day, exerciseIds, notes }) {
+  return {
+    day_of_week: day,
+    exercise_ids: (exerciseIds ?? []).map(Number),
+    notes: notes ?? '',
   };
-  if (form.time) body.time = form.time.length === 5 ? `${form.time}:00` : form.time;
-  if (form.duration !== '' && form.duration != null) body.duration = Number(form.duration);
-  if (form.notes) body.notes = form.notes;
-  if (form.exerciseId) body.exercise = form.exerciseId;
-  if (form.sets !== '' && form.sets != null) body.sets = Number(form.sets);
-  if (form.reps !== '' && form.reps != null) body.reps = Number(form.reps);
-  return body;
-}
-
-/**
- * PUT body for an existing entry. PUT replaces the whole object, so this
- * spreads the original payload and overrides only what changed.
- */
-export function toApiScheduleUpdate(entry, changes = {}) {
-  const { raw = {} } = entry;
-  const body = { ...raw };
-  delete body.id;
-  delete body.pk;
-
-  if ('completed' in changes) {
-    // Write to whichever completion field the object actually came with.
-    const key = ['completed', 'is_completed', 'done'].find((k) => k in raw) ?? 'completed';
-    body[key] = changes.completed;
-  }
-  if ('title' in changes) body.title = changes.title;
-  if ('notes' in changes) body.notes = changes.notes;
-
-  // Nested read-only objects must go back as ids.
-  if (body.exercise && typeof body.exercise === 'object') {
-    body.exercise = exerciseFields.id(body.exercise);
-  }
-  return body;
-}
-
-export function weekdayOf(iso) {
-  if (!iso) return undefined;
-  const d = new Date(`${iso}T00:00:00`);
-  return WEEKDAYS[(d.getDay() + 6) % 7];
 }
 
 export function toISODate(date) {
@@ -297,81 +207,44 @@ export function toISODate(date) {
   return `${y}-${m}-${d}`;
 }
 
-/**
- * Expands entries onto a concrete date range.
- * Date-based entries pass straight through; weekday-based entries repeat on
- * every matching day, so a weekly template still fills the calendar.
- */
-export function expandToRange(entries, startIso, endIso) {
-  const out = [];
-  const start = new Date(`${startIso}T00:00:00`);
-  const end = new Date(`${endIso}T00:00:00`);
-
-  for (const e of entries) {
-    if (e.date) {
-      if (e.date >= startIso && e.date <= endIso) out.push(e);
-      continue;
-    }
-    if (!e.weekday) continue;
-
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      if (WEEKDAYS[(d.getDay() + 6) % 7] === e.weekday) {
-        out.push({ ...e, date: toISODate(d), recurring: true });
-      }
-    }
-  }
-  return out;
-}
-
 /* ========================================================================== */
 /* DERIVED STATS                                                              */
 /* ========================================================================== */
 
 /**
- * There is no /api/stats/ endpoint, so the dashboard computes its numbers from
- * the schedule list. Swap this out if you add a stats endpoint later.
+ * There is no stats endpoint, so the dashboard summarises the weekly plan.
+ * `entries` are normalised schedule entries.
  */
 export function deriveStats(entries, today = new Date()) {
-  const todayIso = toISODate(today);
-  const done = entries.filter((e) => e.completed);
+  const byDay = new Map(entries.map((e) => [e.day, e]));
 
-  // Current streak: consecutive days back from today with a completed session.
-  const completedDays = new Set(done.map((e) => e.date).filter(Boolean));
-  let streak = 0;
-  const cursor = new Date(today);
-  while (completedDays.has(toISODate(cursor))) {
-    streak += 1;
-    cursor.setDate(cursor.getDate() - 1);
-  }
-
-  // Monday-first current week.
-  const weekStart = new Date(today);
-  weekStart.setDate(today.getDate() - ((today.getDay() + 6) % 7));
-  const week = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart);
-    d.setDate(weekStart.getDate() + i);
-    const iso = toISODate(d);
-    const forDay = entries.filter((e) => e.date === iso);
+  const week = DAYS.map((d) => {
+    const entry = byDay.get(d.value);
     return {
-      day: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i],
-      iso,
-      minutes: forDay.filter((e) => e.completed).reduce((a, e) => a + (e.duration || 0), 0),
-      planned: forDay.length,
-      completed: forDay.filter((e) => e.completed).length,
+      day: d.short,
+      code: d.value,
+      entry,
+      count: entry?.exercises.length ?? 0,
     };
   });
 
+  // The next 7 days starting today, each mapped onto its weekly plan.
+  const upcoming = [];
+  for (let i = 0; i < 7; i += 1) {
+    const date = new Date(today);
+    date.setDate(today.getDate() + i);
+    const entry = byDay.get(dayCodeOf(date));
+    if (entry && entry.exercises.length) upcoming.push({ date, entry });
+  }
+
+  const muscleGroups = new Set(entries.flatMap((e) => e.muscleGroups));
+
   return {
-    totalSessions: done.length,
-    currentStreak: streak,
-    totalMinutes: done.reduce((a, e) => a + (e.duration || 0), 0),
-    upcoming: entries
-      .filter((e) => e.date && e.date >= todayIso && !e.completed)
-      .sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time)),
+    trainingDays: week.filter((d) => d.count > 0).length,
+    exercisesScheduled: week.reduce((a, d) => a + d.count, 0),
+    muscleGroups: [...muscleGroups],
+    today: byDay.get(dayCodeOf(today)) ?? null,
     week,
-    thisWeek: {
-      done: week.reduce((a, d) => a + d.completed, 0),
-      planned: week.reduce((a, d) => a + d.planned, 0),
-    },
+    upcoming,
   };
 }

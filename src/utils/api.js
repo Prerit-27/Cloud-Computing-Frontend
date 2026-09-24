@@ -27,8 +27,8 @@
  *     PUT    /api/schedule/{id}/
  *     DELETE /api/schedule/{id}/delete/
  *
- * Auth: DRF TokenAuthentication. /api/login/ and /api/register/ are expected to
- * return a token; it is stored in localStorage and sent as
+ * Auth: DRF TokenAuthentication. /api/login/ and /api/register/ return
+ * {token, user}; it is stored in localStorage and sent as
  *   Authorization: Token <key>
  * on every subsequent request.
  *
@@ -171,15 +171,14 @@ export function unwrapList(payload) {
 /* AUTH / USER                                                                 */
 /* ========================================================================== */
 
-/** Pulls the token out of whatever shape the backend returns it in. */
+/** /login/ and /register/ both return {token, user: {id, username, email, date_joined}}. */
 function extractToken(payload) {
-  return payload?.token ?? payload?.key ?? payload?.auth_token ?? payload?.access ?? null;
+  return payload?.token ?? null;
 }
 
 export async function register(payload) {
   const data = await request('/register/', { method: 'POST', body: payload, authed: false });
   const token = extractToken(data);
-  console.log('register token:', token);
   if (token) auth.setToken(token);
   return data;
 }
@@ -213,8 +212,11 @@ export function changePassword(payload) {
   return request('/profile/change-password/', { method: 'POST', body: payload });
 }
 
-/** @param file a File from an <input type="file"> */
-export function uploadProfilePicture(file, fieldName = 'profile_picture') {
+/**
+ * @param file a File from an <input type="file">
+ * @returns {profile_picture_url}
+ */
+export function uploadProfilePicture(file, fieldName = 'image') {
   const form = new FormData();
   form.append(fieldName, file);
   return request('/profile/upload-picture/', { method: 'POST', body: form });
@@ -264,7 +266,11 @@ export function createScheduleEntry(payload) {
   return request('/schedule/create/', { method: 'POST', body: payload });
 }
 
-/** NOTE: the backend exposes PUT (full replace), not PATCH — send the whole object. */
+/**
+ * NOTE: the backend exposes PUT (full replace), not PATCH — send the whole
+ * object. There is one entry per weekday; POSTing a day that already exists
+ * fails, so update that day's entry instead.
+ */
 export function updateScheduleEntry(id, payload) {
   return request(`/schedule/${id}/`, { method: 'PUT', body: payload });
 }
