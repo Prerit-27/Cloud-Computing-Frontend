@@ -1,52 +1,65 @@
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import AppShell from './components/AppShell';
-import AuthPage from './pages/AuthPage';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
+import { useLenis } from './hooks/useLenis';
+import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/auth-context';
+
 import Home from './pages/Home';
-import CalendarPage from './pages/CalendarPage';
-import ProgressPage from './pages/ProgressPage';
-import ProfilePage from './pages/ProfilePage';
-import { useAuth } from './hooks/useAppData';
-import { startDemoSession } from './utils/api';
-import { useEffect, useState } from 'react';
+import Login from './components/Navbar/Login';
+import Signup from './pages/Signup';
 
-function AppRoutes() {
-  const { user, setUser, loading, login, signup, logout } = useAuth();
-  const [authError, setAuthError] = useState('');
-  const location = useLocation();
-  const navigate = useNavigate();
+import AppLayout from './components/layout/AppLayout';
+import RequireAuth from './components/layout/RequireAuth';
+import Dashboard from './pages/Dashboard';
+import Calendar from './pages/Calendar';
+import Exercises from './pages/Exercises';
+import Profile from './pages/Profile';
 
-  useEffect(() => {
-    if (user && ['/login', '/signup'].includes(location.pathname)) navigate('/', { replace: true });
-  }, [user, location.pathname, navigate]);
+function GuestOnly({ children }) {
+  const { status } = useAuth();
 
-  const submitAuth = async (mode, payload) => {
-    setAuthError('');
-    try { await (mode === 'signup' ? signup(payload) : login(payload)); navigate('/', { replace: true }); }
-    catch (error) { setAuthError(error.message || 'Unable to authenticate. Please try again.'); }
-  };
-
-  const enterDemo = () => {
-    const demoUser = startDemoSession();
-    setUser(demoUser);
-    navigate('/', { replace: true });
-  };
-
-  if (!user && !['/login', '/signup'].includes(location.pathname)) return <Navigate to="/login" replace />;
-  if (['/login', '/signup'].includes(location.pathname)) {
-    return <AuthPage key={location.pathname} mode={location.pathname.slice(1)} onSubmit={(payload) => submitAuth(location.pathname.slice(1), payload)} onDemo={enterDemo} loading={loading} error={authError} onModeChange={(mode) => { setAuthError(''); navigate(`/${mode}`); }} />;
+  if (status === 'checking') {
+    return (
+      <div className="min-h-screen bg-[#070707] grid place-items-center">
+        <Loader2 className="w-6 h-6 animate-spin text-[#7CFF5B]" />
+      </div>
+    );
   }
 
-  return <AppShell user={user} onLogout={async () => { await logout(); navigate('/login', { replace: true }); }}>
-    <Routes>
-      <Route path="/" element={<Home user={user} />} />
-      <Route path="/calendar" element={<CalendarPage />} />
-      <Route path="/progress" element={<ProgressPage />} />
-      <Route path="/profile" element={<ProfilePage user={user} onUserChange={setUser} onLogout={async () => { await logout(); navigate('/login', { replace: true }); }} />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
-  </AppShell>;
+  return status === 'authed' ? <Navigate to="/app/dashboard" replace /> : children;
 }
 
 export default function App() {
-  return <BrowserRouter><AppRoutes /></BrowserRouter>;
+  useLenis();
+
+  return (
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Public */}
+          <Route path="/" element={<Home />} />
+          <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
+          <Route path="/signup" element={<GuestOnly><Signup /></GuestOnly>} />
+
+          {/* Authenticated app */}
+          <Route
+            path="/app"
+            element={
+              <RequireAuth>
+                <AppLayout />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<Navigate to="/app/dashboard" replace />} />
+            <Route path="dashboard" element={<Dashboard />} />
+            <Route path="calendar" element={<Calendar />} />
+            <Route path="exercises" element={<Exercises />} />
+            <Route path="profile" element={<Profile />} />
+          </Route>
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
 }

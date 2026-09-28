@@ -1,208 +1,280 @@
-const API_BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
-const DEMO_KEY = 'fitpulse_demo';
-const DEMO_DATA_KEY = 'fitpulse_demo_data';
+/**
+ * ============================================================================
+ *  API LAYER — every call to the Django backend goes through this file.
+ * ============================================================================
+ *
+ * Endpoints mirror /api/schema/ exactly:
+ *
+ *   exercises
+ *     GET    /api/exercises/
+ *     POST   /api/exercises/create/
+ *     PATCH  /api/exercises/{id}/
+ *     DELETE /api/exercises/{id}/delete/
+ *
+ *   user
+ *     POST   /api/register/
+ *     POST   /api/login/
+ *     POST   /api/logout/
+ *     GET    /api/profile/
+ *     PATCH  /api/profile/
+ *     POST   /api/profile/change-password/
+ *     POST   /api/profile/upload-picture/
+ *     DELETE /api/profile/delete/
+ *
+ *   schedule
+ *     GET    /api/schedule/
+ *     POST   /api/schedule/create/
+ *     PUT    /api/schedule/{id}/
+ *     DELETE /api/schedule/{id}/delete/
+ *
+ * Auth: DRF TokenAuthentication. /api/login/ and /api/register/ return
+ * {token, user}; it is stored in localStorage and sent as
+ *   Authorization: Token <key>
+ * on every subsequent request.
+ *
+ * Configure the base URL in .env:
+ *   VITE_API_URL=http://127.0.0.1:8000/api
+ */
 
-const dateFromToday = (amount) => {
-  const date = new Date();
-  date.setHours(12, 0, 0, 0);
-  date.setDate(date.getDate() + amount);
-  return date.toISOString().slice(0, 10);
+export const API_URL = (import.meta.env?.VITE_API_URL ?? 'http://127.0.0.1:8000/api').replace(
+  /\/$/,
+  ''
+);
+
+const TOKEN_KEY = 'fitpulse.token';
+
+export const auth = {
+  getToken: () => {
+    try {
+      return localStorage.getItem(TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  setToken: (token) => {
+    try {
+      if (token) localStorage.setItem(TOKEN_KEY, token);
+    } catch {
+      /* storage unavailable */
+    }
+  },
+  clearToken: () => {
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  },
+  isAuthenticated: () => !!auth.getToken(),
 };
 
-const initialDemoData = () => ({
-  schedule: [
-    { id: 'demo-today', date: dateFromToday(0), muscle: 'Chest', exercises: ['Barbell bench press', 'Incline dumbbell press', 'Cable fly'] },
-    { id: 'demo-back', date: dateFromToday(1), muscle: 'Back', exercises: ['Lat pulldown', 'Seated cable row', 'Romanian deadlift'] },
-    { id: 'demo-legs', date: dateFromToday(2), muscle: 'Quads', exercises: ['Back squat', 'Leg press', 'Walking lunges'] },
-    { id: 'demo-shoulders', date: dateFromToday(4), muscle: 'Shoulders', exercises: ['Overhead press', 'Lateral raise', 'Face pulls'] },
-  ],
-  progress: [
-    { id: 'demo-picture-1', date: dateFromToday(-28), url: 'https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=800&h=1000&fit=crop&q=85' },
-    { id: 'demo-picture-2', date: dateFromToday(-14), url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&h=1000&fit=crop&q=85' },
-  ],
-  profile: { id: 'demo-user', name: 'Alex Morgan', email: 'alex@fitpulse.demo', bio: 'Building consistency one session at a time.' },
-});
+/** Raised for any non-2xx response. `fields` holds DRF per-field errors. */
+export class ApiError extends Error {
+  constructor(message, { status, fields } = {}) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.fields = fields ?? {};
+  }
+}
 
-const readDemoData = () => {
+/** Turns a DRF error body into a readable message + per-field map. */
+function parseErrorBody(body, status) {
+  if (!body || typeof body !== 'object') {
+    return { message: `Request failed (${status})`, fields: {} };
+  }
+  if (typeof body.detail === 'string') {
+    return { message: body.detail, fields: {} };
+  }
+
+  const fields = {};
+  const parts = [];
+  for (const [key, value] of Object.entries(body)) {
+    const text = Array.isArray(value) ? value.join(' ') : String(value);
+    parts.push(key === 'non_field_errors' ? text : `${key}: ${text}`);
+    fields[key] = text;
+  }
+  return {
+    message: parts.join('\n') || `Request failed (${status})`,
+    fields,
+  };
+}
+
+/**
+ * Core fetch wrapper.
+ *
+ * @param path      endpoint path, e.g. '/exercises/'
+ * @param method    HTTP verb
+ * @param body      plain object (sent as JSON) or FormData (sent as-is)
+ * @param authed    attach the Authorization header (default true)
+ */
+export async function request(path, { method = 'GET', body, authed = true, ...rest } = {}) {
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const token = authed ? auth.getToken() : null;
+
+  const headers = {
+    Accept: 'application/json',
+    // FormData must set its own multipart boundary — never set Content-Type here.
+    ...(isFormData || body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    ...(token ? { Authorization: `Token ${token}` } : {}),
+    ...rest.headers,
+  };
+
+  let res;
   try {
-    const saved = JSON.parse(localStorage.getItem(DEMO_DATA_KEY) || 'null');
-    if (saved) return saved;
-  } catch { /* Use fresh demo data when storage is unavailable or invalid. */ }
-  const fresh = initialDemoData();
-  localStorage.setItem(DEMO_DATA_KEY, JSON.stringify(fresh));
-  return fresh;
-};
-
-const writeDemoData = (data) => {
-  localStorage.setItem(DEMO_DATA_KEY, JSON.stringify(data));
-  return data;
-};
-
-const isDemoSession = () => localStorage.getItem(DEMO_KEY) === 'true';
-const demoResult = (value) => Promise.resolve(value);
-
-function getToken() {
-  return localStorage.getItem('fitpulse_token');
-}
-
-export function startDemoSession() {
-  localStorage.setItem(DEMO_KEY, 'true');
-  const user = readDemoData().profile;
-  saveSession({ token: 'fitpulse-demo-token', user });
-  return user;
-}
-
-export function saveSession(session) {
-  if (session?.token) localStorage.setItem('fitpulse_token', session.token);
-  if (session?.user) localStorage.setItem('fitpulse_user', JSON.stringify(session.user));
-}
-
-export function clearSession() {
-  localStorage.removeItem('fitpulse_token');
-  localStorage.removeItem('fitpulse_user');
-  localStorage.removeItem(DEMO_KEY);
-}
-
-export function getStoredUser() {
-  try {
-    return JSON.parse(localStorage.getItem('fitpulse_user') || 'null');
+    res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers,
+      ...(body !== undefined ? { body: isFormData ? body : JSON.stringify(body) } : {}),
+      ...rest,
+    });
   } catch {
-    return null;
+    throw new ApiError('Cannot reach the server. Is the Django dev server running?', {
+      status: 0,
+    });
+  }
+
+  if (res.status === 401) {
+    auth.clearToken();
+    throw new ApiError('Your session has expired. Please log in again.', { status: 401 });
+  }
+
+  if (!res.ok) {
+    let parsed = { message: `Request failed (${res.status})`, fields: {} };
+    try {
+      parsed = parseErrorBody(await res.json(), res.status);
+    } catch {
+      /* error body was not JSON */
+    }
+    throw new ApiError(parsed.message, { status: res.status, fields: parsed.fields });
+  }
+
+  if (res.status === 204) return null;
+
+  const text = await res.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
   }
 }
 
-async function request(path, options = {}) {
-  const headers = new Headers(options.headers || {});
-  const token = getToken();
-  if (!(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-    credentials: 'include',
-  });
-
-  const contentType = response.headers.get('content-type') || '';
-  const body = response.status === 204 ? null : contentType.includes('application/json')
-    ? await response.json()
-    : await response.text();
-
-  if (!response.ok) {
-    const message = typeof body === 'object' && body
-      ? body.message || body.error || body.detail
-      : body;
-    throw new Error(message || `Request failed (${response.status})`);
-  }
-  return body;
+/** DRF pagination returns {count, next, previous, results}; plain lists don't. */
+export function unwrapList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && Array.isArray(payload.results)) return payload.results;
+  return [];
 }
 
-const unwrap = (value, keys) => {
-  if (!value) return value;
-  for (const key of keys) if (value[key] !== undefined) return value[key];
-  return value;
-};
+/* ========================================================================== */
+/* AUTH / USER                                                                 */
+/* ========================================================================== */
 
-const demoProfile = () => readDemoData().profile;
-const demoFileUrl = (file) => new Promise((resolve, reject) => {
-  const reader = new FileReader();
-  reader.onload = () => resolve(reader.result);
-  reader.onerror = reject;
-  reader.readAsDataURL(file);
-});
+/** /login/ and /register/ both return {token, user: {id, username, email, date_joined}}. */
+function extractToken(payload) {
+  return payload?.token ?? null;
+}
 
-export const api = {
-  auth: {
-    login: (payload) => request('/auth/login', { method: 'POST', body: JSON.stringify(payload) }),
-    signup: (payload) => request('/auth/signup', { method: 'POST', body: JSON.stringify(payload) }),
-    logout: () => isDemoSession() ? demoResult(null) : request('/auth/logout', { method: 'POST' }),
-  },
-  profile: {
-    get: async () => isDemoSession() ? demoProfile() : unwrap(await request('/profile'), ['profile', 'user', 'data']),
-    update: async (payload) => {
-      if (isDemoSession()) {
-        const data = readDemoData();
-        data.profile = { ...data.profile, ...payload };
-        writeDemoData(data);
-        return data.profile;
-      }
-      return unwrap(await request('/profile', { method: 'PUT', body: JSON.stringify(payload) }), ['profile', 'user', 'data']);
-    },
-    picture: async (file) => {
-      if (isDemoSession()) {
-        const data = readDemoData();
-        data.profile = { ...data.profile, profilePicture: await demoFileUrl(file) };
-        writeDemoData(data);
-        return data.profile;
-      }
-      const form = new FormData();
-      form.append('picture', file);
-      return unwrap(await request('/profile/picture', { method: 'POST', body: form }), ['profile', 'user', 'data']);
-    },
-    remove: () => {
-      if (isDemoSession()) {
-        localStorage.removeItem(DEMO_DATA_KEY);
-        return demoResult(null);
-      }
-      return request('/profile', { method: 'DELETE' });
-    },
-  },
-  schedule: {
-    list: async () => isDemoSession() ? readDemoData().schedule : unwrap(await request('/schedule'), ['schedule', 'schedules', 'data']) || [],
-    create: (payload) => {
-      if (isDemoSession()) {
-        const data = readDemoData();
-        const item = { ...payload, id: `demo-${Date.now()}` };
-        data.schedule = [...data.schedule, item];
-        writeDemoData(data);
-        return demoResult(item);
-      }
-      return request('/schedule', { method: 'POST', body: JSON.stringify(payload) });
-    },
-    update: (id, payload) => {
-      if (isDemoSession()) {
-        const data = readDemoData();
-        data.schedule = data.schedule.map((item) => String(item.id) === String(id) ? { ...item, ...payload } : item);
-        writeDemoData(data);
-        return demoResult(data.schedule.find((item) => String(item.id) === String(id)));
-      }
-      return request(`/schedule/${id}`, { method: 'PUT', body: JSON.stringify(payload) });
-    },
-    remove: (id) => {
-      if (isDemoSession()) {
-        const data = readDemoData();
-        data.schedule = data.schedule.filter((item) => String(item.id) !== String(id));
-        writeDemoData(data);
-        return demoResult(null);
-      }
-      return request(`/schedule/${id}`, { method: 'DELETE' });
-    },
-  },
-  progress: {
-    list: async () => isDemoSession() ? readDemoData().progress : unwrap(await request('/progress'), ['progress', 'pictures', 'data']) || [],
-    upload: async (file, date) => {
-      if (isDemoSession()) {
-        const data = readDemoData();
-        const picture = { id: `demo-picture-${Date.now()}`, date: date || dateFromToday(0), url: await demoFileUrl(file) };
-        data.progress = [...data.progress, picture];
-        writeDemoData(data);
-        return picture;
-      }
-      const form = new FormData();
-      form.append('picture', file);
-      if (date) form.append('date', date);
-      return request('/progress', { method: 'POST', body: form });
-    },
-    remove: (id) => {
-      if (isDemoSession()) {
-        const data = readDemoData();
-        data.progress = data.progress.filter((item) => String(item.id) !== String(id));
-        writeDemoData(data);
-        return demoResult(null);
-      }
-      return request(`/progress/${id}`, { method: 'DELETE' });
-    },
-  },
-};
+export async function register(payload) {
+  const data = await request('/register/', { method: 'POST', body: payload, authed: false });
+  const token = extractToken(data);
+  if (token) auth.setToken(token);
+  return data;
+}
 
-export { API_BASE_URL, isDemoSession };
+export async function login(payload) {
+  const data = await request('/login/', { method: 'POST', body: payload, authed: false });
+  const token = extractToken(data);
+  if (token) auth.setToken(token);
+  return data;
+}
+
+export async function logout() {
+  try {
+    await request('/logout/', { method: 'POST' });
+  } catch {
+    // A failed logout must never strand the user in a logged-in UI.
+  } finally {
+    auth.clearToken();
+  }
+}
+
+export function getProfile() {
+  return request('/profile/');
+}
+
+export function updateProfile(patch) {
+  return request('/profile/', { method: 'PATCH', body: patch });
+}
+
+export function changePassword(payload) {
+  return request('/profile/change-password/', { method: 'POST', body: payload });
+}
+
+/**
+ * @param file a File from an <input type="file">
+ * @returns {profile_picture_url}
+ */
+export function uploadProfilePicture(file, fieldName = 'image') {
+  const form = new FormData();
+  form.append(fieldName, file);
+  return request('/profile/upload-picture/', { method: 'POST', body: form });
+}
+
+export async function deleteAccount() {
+  const result = await request('/profile/delete/', { method: 'DELETE' });
+  auth.clearToken();
+  return result;
+}
+
+/* ========================================================================== */
+/* EXERCISES                                                                   */
+/* ========================================================================== */
+
+export async function listExercises(params = {}) {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== '' && v != null)
+  ).toString();
+  return unwrapList(await request(`/exercises/${qs ? `?${qs}` : ''}`));
+}
+
+export function createExercise(payload) {
+  return request('/exercises/create/', { method: 'POST', body: payload });
+}
+
+export function updateExercise(id, patch) {
+  return request(`/exercises/${id}/`, { method: 'PATCH', body: patch });
+}
+
+export function deleteExercise(id) {
+  return request(`/exercises/${id}/delete/`, { method: 'DELETE' });
+}
+
+/* ========================================================================== */
+/* SCHEDULE                                                                    */
+/* ========================================================================== */
+
+export async function listSchedule(params = {}) {
+  const qs = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== '' && v != null)
+  ).toString();
+  return unwrapList(await request(`/schedule/${qs ? `?${qs}` : ''}`));
+}
+
+export function createScheduleEntry(payload) {
+  return request('/schedule/create/', { method: 'POST', body: payload });
+}
+
+/**
+ * NOTE: the backend exposes PUT (full replace), not PATCH — send the whole
+ * object. There is one entry per weekday; POSTing a day that already exists
+ * fails, so update that day's entry instead.
+ */
+export function updateScheduleEntry(id, payload) {
+  return request(`/schedule/${id}/`, { method: 'PUT', body: payload });
+}
+
+export function deleteScheduleEntry(id) {
+  return request(`/schedule/${id}/delete/`, { method: 'DELETE' });
+}
