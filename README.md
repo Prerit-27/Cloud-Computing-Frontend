@@ -1,91 +1,64 @@
-⏺ The landing page draft is complete. Need to fix design, layout and any unnecessary components. Here's a summary of everything built:
+# FitPulse Frontend
 
-  ---
-  Project Structure
+React and Vite frontend for FitPulse, a workout planning and exercise tracking app. It includes a public landing page, authentication, and protected dashboard, calendar, exercise library, and profile pages.
 
-  src/
-  ├── components/
-  │   ├── Navbar/Navbar.jsx          # Sticky navbar with blur, mobile menu
-  │   ├── Hero/Hero.jsx              # Full-screen hero with particles, floating cards
-  │   ├── Trust/Trust.jsx            # Animated counter metrics section
-  │   ├── Features/Features.jsx      # 6 staggered feature cards with hover glow
-  │   ├── ExercisePreview/ExercisePreview.jsx  # Exercise cards with Unsplash images
-  │   ├── MuscleGroup/MuscleGroup.jsx          # Interactive body map with hover badges
-  │   ├── HowItWorks/HowItWorks.jsx  # 3-step timeline with connecting line
-  │   ├── DashboardPreview/DashboardPreview.jsx # Mock dashboard with charts & calendar
-  │   ├── Testimonials/Testimonials.jsx  # Glassmorphism testimonial cards
-  │   ├── CTA/CTA.jsx                # Animated gradient CTA section
-  │   ├── Footer/Footer.jsx          # 5-column footer with social icons
-  │   └── ui/
-  │       ├── SectionHeading.jsx     # Reusable section header with scroll animation
-  │       └── CountUp.jsx            # Animated counter component
-  ├── hooks/
-  │   ├── useLenis.js                # Smooth scrolling
-  │   └── useScrollProgress.js       # Scroll position tracking
-  ├── utils/
-  │   └── data.js                    # All static data & constants
-  ├── pages/
-  │   └── Home.jsx                   # Main page assembling all sections
-  ├── utils/
-  │   └── data.js                    # All static data & constants
-  ├── pages/
-  │   └── Home.jsx                   # Main page assembling all sections
-  ├── App.jsx                        # Root component with Lenis
-  ├── main.jsx                       # React entry point
-  └── index.css                      # Tailwind v4 theme + global styles
+## Requirements
 
-  ├── main.jsx                       # React entry point
-  └── index.css                      # Tailwind v4 theme + global styles
+- Node.js 20.19+ or 22.12+
+- npm
+- The FitPulse Django API for login and backend-backed app features
 
-  Dependencies Installed
+## Setup
 
-  - TailwindCSS v4 with @tailwindcss/vite plugin
-  - Framer Motion v13 for animations
-  - Lenis for smooth scrolling
-  - Lucide React for icons
-  - TailwindCSS v4 with @tailwindcss/vite plugin
-  - Framer Motion v13 for animations
-  - Lenis for smooth scrolling
-  - Lucide React for icons
-  - React Icons (FontAwesome 6) for social icons
-  - React Router DOM v7 for routing
-  - GSAP available if needed
+From the `frontend` directory:
 
-  Key Design Decisions
+```bash
+npm install
+```
 
-  - Dark theme throughout: #070707 background, #111111 cards, #181818 secondary surfaces
-  - Accent colors: #7CFF5B (green) primary, #5BE7FF (cyan) secondary
-  - Subtle borders: rgba(255,255,255,0.08) — no harsh lines
-  │   └── useScrollProgress.js       # Scroll position tracking
-  ├── utils/
-  │   └── data.js                    # All static data & constants
-  ├── pages/
-  │   └── Home.jsx                   # Main page assembling all sections
-  ├── App.jsx                        # Root component with Lenis
-  ├── main.jsx                       # React entry point
-  └── index.css                      # Tailwind v4 theme + global styles
+The API URL defaults to `http://127.0.0.1:8000/api`. To use a different backend, copy `.env.example` to `.env` and set the API base URL (include `/api`):
 
-  Dependencies Installed
+```env
+VITE_API_URL=http://127.0.0.1:8000/api
+```
 
-  - TailwindCSS v4 with @tailwindcss/vite plugin
-  - Framer Motion v13 for animations
-  - Lenis for smooth scrolling
-  - Lucide React for icons
-  - React Icons (FontAwesome 6) for social icons
-  - React Router DOM v7 for routing
-  - GSAP available if needed
+Restart Vite after changing environment variables. Ensure the backend allows requests from the frontend origin through its CORS configuration.
 
-  Key Design Decisions
+## Run locally
 
-  - Dark theme throughout: #070707 background, #111111 cards, #181818 secondary surfaces
-  - Accent colors: #7CFF5B (green) primary, #5BE7FF (cyan) secondary
-  - Subtle borders: rgba(255,255,255,0.08) — no harsh lines
-  - Typography: Inter font, 4xl-8xl headings, tight tracking
-  - Animations: Framer Motion scroll-triggered reveals, staggered cards, floating elements, hover lift effects
-  - Glassmorphism: Backdrop blur on navbar, floating hero cards, testimonials
-  - Mobile-first: Responsive grid, hamburger menu, stacked cards on small screens
+Start the Django backend, then run the frontend development server:
 
-  To Run
+```bash
+npm run dev
+```
 
-  npm run dev     # http://localhost:5173
-  npm run build   # Production build → dist/
+Vite prints the local URL (typically <http://localhost:5173>).
+
+## Available commands
+
+```bash
+npm run dev      # Start the Vite development server
+npm run build    # Create a production build in dist/
+npm run preview  # Preview the production build locally
+npm run lint     # Run ESLint
+```
+
+## Routes and authentication
+
+| Route | Access | Description |
+| --- | --- | --- |
+| `/` | Public | Landing page |
+| `/login` | Public | Sign in; users who tried to access a protected page return there after login |
+| `/signup` | Public | Create an account |
+| `/app/dashboard` | Signed in | Dashboard |
+| `/app/calendar` | Signed in | Weekly workout planner |
+| `/app/exercises` | Signed in | Exercise library |
+| `/app/profile` | Signed in | Profile and account settings |
+
+A saved token is verified against the profile API on app startup. Signed-out visitors are redirected to login when opening protected routes. Signed-in visitors who open login or signup are redirected to the dashboard. The landing page remains accessible while signed in.
+
+## API configuration
+
+`VITE_API_URL` is read in `src/utils/config.js` and is the base for API requests. Relative backend media URLs use the same host without the trailing `/api`. Public landing-page assets, including the exercise preview images, are served from `public/`.
+
+See [`FRONTEND_NOTES.md`](./FRONTEND_NOTES.md) for endpoint and serializer details used by the frontend.
