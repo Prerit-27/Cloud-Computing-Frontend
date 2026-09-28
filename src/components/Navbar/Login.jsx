@@ -19,7 +19,7 @@ export default function Login() {
     setError("");
     setSubmitting(true);
     try {
-      await signIn({ username, password });
+      await signIn({ identifier: username, username, password });
       navigate(location.state?.from ?? "/app/dashboard", { replace: true });
     } catch (err) {
       setError(err.message || "Could not sign you in. Check your details and try again.");

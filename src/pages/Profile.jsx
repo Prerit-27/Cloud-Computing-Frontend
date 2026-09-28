@@ -206,15 +206,14 @@ export default function Profile() {
   return (
     <div>
       {/* ================= COVER + IDENTITY ================= */}
-      <div className="relative rounded-3xl overflow-hidden border border-white/[0.06] mb-6">
+      <div className="relative rounded-3xl overflow-hidden border border-white/[0.06] mb-6 bg-gradient-to-br from-[#152414] via-[#101a17] to-[#101010]">
         {/* Decorative only. The blur circle overflows the header, so without
             pointer-events-none it sits on top of the buttons below it. */}
-        <div className="h-36 sm:h-44 bg-gradient-to-br from-[#7CFF5B]/25 via-[#5BE7FF]/12 to-transparent relative pointer-events-none">
-          <div className="absolute inset-0 bg-[#070707]/35" />
-          <div className="absolute -top-20 -right-10 w-80 h-80 rounded-full bg-[#7CFF5B]/20 blur-[100px]" />
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute -top-20 -right-10 w-80 h-80 rounded-full bg-[#7CFF5B]/10 blur-[100px]" />
         </div>
 
-        <div className="bg-[#101010] px-6 sm:px-8 pb-7">
+        <div className="relative px-6 sm:px-8 pt-36 sm:pt-44 pb-7">
           <div className="flex flex-wrap items-end gap-5 -mt-14">
             <div className="relative">
               <div className="w-28 h-28 rounded-3xl bg-gradient-to-br from-[#7CFF5B] to-[#5BE7FF] grid place-items-center text-[#070707] text-3xl font-black ring-4 ring-[#101010] overflow-hidden">
