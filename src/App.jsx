@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { useLenis } from './hooks/useLenis';
 import { AuthProvider } from './context/AuthContext';
+import { useAuth } from './context/auth-context';
 
 import Home from './pages/Home';
 import Login from './components/Navbar/Login';
@@ -13,6 +15,20 @@ import Calendar from './pages/Calendar';
 import Exercises from './pages/Exercises';
 import Profile from './pages/Profile';
 
+function GuestOnly({ children }) {
+  const { status } = useAuth();
+
+  if (status === 'checking') {
+    return (
+      <div className="min-h-screen bg-[#070707] grid place-items-center">
+        <Loader2 className="w-6 h-6 animate-spin text-[#7CFF5B]" />
+      </div>
+    );
+  }
+
+  return status === 'authed' ? <Navigate to="/app/dashboard" replace /> : children;
+}
+
 export default function App() {
   useLenis();
 
@@ -22,8 +38,8 @@ export default function App() {
         <Routes>
           {/* Public */}
           <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
+          <Route path="/login" element={<GuestOnly><Login /></GuestOnly>} />
+          <Route path="/signup" element={<GuestOnly><Signup /></GuestOnly>} />
 
           {/* Authenticated app */}
           <Route

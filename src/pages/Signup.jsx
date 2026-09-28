@@ -3,19 +3,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Dumbbell, Eye, EyeOff, Check, AlertCircle, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/auth-context';
 
-const GOALS = [
-  { value: 'build_muscle', label: 'Build Muscle' },
-  { value: 'lose_fat', label: 'Lose Fat' },
-  { value: 'strength', label: 'Get Stronger' },
-  { value: 'endurance', label: 'Endurance' },
-];
-
-const EXPERIENCE = [
-  { value: 'beginner', label: 'Beginner', hint: '0–1 yr' },
-  { value: 'intermediate', label: 'Intermediate', hint: '1–3 yrs' },
-  { value: 'advanced', label: 'Advanced', hint: '3+ yrs' },
-];
-
 const inputClass = `
   w-full h-13 px-4 rounded-xl bg-[#151515] border border-white/10 text-white
   placeholder:text-white/25 outline-none transition

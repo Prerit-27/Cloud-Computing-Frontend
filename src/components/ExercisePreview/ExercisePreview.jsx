@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
-import { Dumbbell, Target, Gauge } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Dumbbell, Target } from 'lucide-react';
 import SectionHeading from '../ui/SectionHeading';
 import { EXERCISES, DIFFICULTY_COLORS } from '../../utils/data';
 
@@ -80,9 +81,12 @@ export default function ExercisePreview() {
           transition={{ delay: 0.4, duration: 0.5 }}
           className="mt-12 text-center"
         >
-          <button className="px-8 py-3.5 rounded-2xl bg-[#181818] text-white font-medium text-sm border border-[rgba(255,255,255,0.08)] hover:bg-[#222] hover:border-[rgba(255,255,255,0.15)] transition-all duration-300 hover:scale-105 cursor-pointer">
+          <Link
+            to="/app/exercises"
+            className="inline-block px-8 py-3.5 rounded-2xl bg-[#181818] text-white font-medium text-sm border border-[rgba(255,255,255,0.08)] hover:bg-[#222] hover:border-[rgba(255,255,255,0.15)] transition-all duration-300 hover:scale-105 cursor-pointer"
+          >
             View Full Exercise Library
-          </button>
+          </Link>
         </motion.div>
       </div>
     </section>

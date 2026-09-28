@@ -2,14 +2,19 @@ import { motion } from 'framer-motion';
 import { ArrowRight, Play, Flame, TrendingUp, Activity, Zap, ChevronDown } from 'lucide-react';
 
 function ParticleField() {
-  const particles = Array.from({ length: 30 }, (_, i) => ({
-    id: i,
-    x: Math.random() * 100,
-    y: Math.random() * 100,
-    size: Math.random() * 2 + 1,
-    duration: Math.random() * 3 + 2,
-    delay: Math.random() * 2,
-  }));
+  // Deterministic pseudo-random spread — Math.random() is impure and may not
+  // be called during render, so derive stable values from the index instead.
+  const particles = Array.from({ length: 30 }, (_, i) => {
+    const rand = (n) => ((i * 9301 + n * 49297) % 233280) / 233280;
+    return {
+      id: i,
+      x: rand(1) * 100,
+      y: rand(2) * 100,
+      size: rand(3) * 2 + 1,
+      duration: rand(4) * 3 + 2,
+      delay: rand(5) * 2,
+    };
+  });
 
   return (
     <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -33,33 +38,6 @@ function ParticleField() {
     </div>
   );
 }
-
-const FLOATING_CARDS = [
-  {
-    icon: Flame,
-    label: 'Calories',
-    value: '2,847',
-    sub: 'kcal today',
-    color: '#FF5B8A',
-    position: '-right-8 top-20',
-  },
-  {
-    icon: TrendingUp,
-    label: 'Progress',
-    value: '+12%',
-    sub: 'this week',
-    color: '#7CFF5B',
-    position: '-left-4 bottom-20',
-  },
-  {
-    icon: Activity,
-    label: 'Streak',
-    value: '14',
-    sub: 'days',
-    color: '#5BE7FF',
-    getPosition: '-right-16 bottom-40',
-  },
-];
 
 export default function Hero() {
   const handleScroll = (href) => {

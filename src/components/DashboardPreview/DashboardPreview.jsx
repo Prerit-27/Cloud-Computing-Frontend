@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import SectionHeading from '../ui/SectionHeading';
-import { BarChart3, TrendingUp, Activity, Calendar, Flame, Gauge } from 'lucide-react';
+import { TrendingUp, Activity, Calendar, Flame, Gauge } from 'lucide-react';
 
 function MiniChart({ label, value, change, color, bars }) {
   return (

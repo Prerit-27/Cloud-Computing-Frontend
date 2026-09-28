@@ -1,4 +1,4 @@
-import { Dumbbell, Salad, Target, BarChart3, Calendar, Zap, TrendingUp } from 'lucide-react';
+import { Dumbbell, Target, BarChart3, Calendar, Zap, TrendingUp } from 'lucide-react';
 
 export const NAV_LINKS = [
   { label: 'Home', href: '#home' },
@@ -70,28 +70,28 @@ export const EXERCISES = [
     muscle: 'Back',
     difficulty: 'Advanced',
     equipment: 'Barbell',
-    image: 'https://images.unsplash.com/photo-1571846210581-5e1c4a37cce1?w=600&h=400&fit=crop&q=80',
+    image: '/deadlift.jpg',
   },
   {
     name: 'Lat Pulldown',
     muscle: 'Back',
     difficulty: 'Beginner',
     equipment: 'Cable',
-    image: 'https://images.unsplash.com/photo-1603287681836-b174ce5074c3?w=600&h=400&fit=crop&q=80',
+    image: '/latpulldown.jpg',
   },
   {
     name: 'Bicep Curl',
     muscle: 'Biceps',
     difficulty: 'Beginner',
     equipment: 'Dumbbell',
-    image: 'https://images.unsplash.com/photo-1581009146145-b5ef050c2df3?w=600&h=400&fit=crop&q=80',
+    image: '/bicepcurl.webp',
   },
   {
     name: 'Leg Press',
     muscle: 'Quadriceps',
     difficulty: 'Beginner',
     equipment: 'Machine',
-    image: 'https://images.unsplash.com/photo-1603281803106-7558c8d33a83?w=600&h=400&fit=crop&q=80',
+    image: '/legpress.jpg',
   },
 ];
 

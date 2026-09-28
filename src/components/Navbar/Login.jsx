@@ -63,7 +63,7 @@ export default function Login() {
                 {/* Main image */}
                 <div className="absolute left-[25%] top-[5%] w-[330px] h-[420px] rounded-[28px] overflow-hidden rotate-2 shadow-2xl border border-white/10">
                   <img
-                    src="https://images.unsplash.com/photo-1581009146145-b5ef050c2e1a"
+                    src="/loginpageworkoutimg.jpeg"
                     alt="Gym workout"
                     className="w-full h-full object-cover"
                   />
