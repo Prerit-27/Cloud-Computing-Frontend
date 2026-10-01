@@ -34,7 +34,7 @@ function GuestActions({ mobile = false, onNavigate }) {
         onClick={onNavigate}
         className={mobile
           ? 'px-8 py-3 text-sm font-medium text-white rounded-xl bg-[#181818] border border-[rgba(255,255,255,0.08)] hover:bg-[#222] transition-colors'
-          : 'px-4 py-2 text-sm font-medium text-[#B8B8B8] hover:text-white transition-colors duration-200'}
+          : 'px-4 py-2 text-sm font-medium text-[#B8B8B8] hover:text-[#070707] transition-colors duration-200'}
       >
         Login
       </Link>
